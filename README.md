@@ -6,7 +6,7 @@ Built with ❤️ for music enthusiasts and creators, it allows you to transform
 
 | Description | Link |  
 | ----------- | ---- |  
-| 📙 Colab Notebook | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/R3gm/AICoverGen/blob/main/colab_notebook.ipynb) |  
+| 📙 Colab Notebook | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/BF667/notebook/blob/main/colab_notebook.ipynb) |  
 | 🎉 Repository | [![GitHub Repository](https://img.shields.io/badge/GitHub-Repository-black?style=flat-square&logo=github)](https://github.com/AsukaDrv/AsukaRVC) |  
 
 ## Key Functions  
