@@ -161,13 +161,13 @@ deecho_models = [
 
 @lru_cache(maxsize=None)
 def import_voice_converter():
-    from programs.applio_code.rvc.infer.infer import VoiceConverter
+    from programs.rvc.infer.infer import VoiceConverter
     return VoiceConverter()
 
 
 @lru_cache(maxsize=1)
 def get_config():
-    from programs.applio_code.rvc.configs.config import Config
+    from programs.rvc.configs.config import Config
     return Config()
 
 
