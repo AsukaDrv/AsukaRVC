@@ -327,7 +327,7 @@ if __name__ == '__main__':
             with gr.Row():
                 clear_btn = gr.ClearButton(value='Clear', components=[song_input, rvc_model, keep_files, local_file])
                 generate_btn = gr.Button("Generate", variant='primary')
-                ai_cover = gr.Audio(label='AI Cover')
+            ai_cover = gr.Audio(label='AI Cover')
                     
             
             ref_btn.click(update_models_list, None, outputs=rvc_model)
