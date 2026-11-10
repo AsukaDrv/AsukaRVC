@@ -25,7 +25,7 @@ def configure_logging_libs(debug=False):
 
 configure_logging_libs()
 
-from code import (
+from core import (
     song_cover_pipeline,
     yt_download,
     models_vocals,
