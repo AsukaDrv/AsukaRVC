@@ -1,6 +1,6 @@
 pip>=23.3
 wheel
-omegaconf>=2.0.6
+wget
 torch>=2.3.1
 torchvision>=0.18.1
 torchaudio>=2.3.1
