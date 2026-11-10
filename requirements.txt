@@ -22,6 +22,8 @@ matplotlib>=3.7.2
 gradio
 yt-dlp
 tqdm>=4.65.0
+onnxruntime; sys_platform == 'darwin'
+onnxruntime-gpu; sys_platform != 'darwin'
 edge-tts>=7.2.7
 fastapi>=0.100.0
 uvicorn>=0.23.0
@@ -30,5 +32,6 @@ spaces
 sox
 pedalboard 
 noisereduce 
+audio-separator==0.18.0
 torchcrepe 
 torchfcpe

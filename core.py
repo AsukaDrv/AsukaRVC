@@ -22,6 +22,7 @@ from pedalboard import Pedalboard, Reverb, Compressor, HighpassFilter
 from pedalboard.io import AudioFile
 from pydub import AudioSegment
 import noisereduce as nr
+from audio_separator.separator import Separator
 
 from programs.rvc.lib.tools.model_download import model_download_pipeline
 
@@ -35,8 +36,9 @@ sys.path.append(now_dir)
 rvc_models_dir = os.path.join(now_dir, 'rvc_models')
 output_dir = os.path.join(now_dir, 'song_output')
 
-# All music separation is handled by the MSST-based inference script in
-# programs/music_separation_code (no MDXNet / audio-separator anymore).
+# MSST models are handled by the inference script in programs/music_separation_code,
+# while VR/MDX models (UVR-*) are handled by the audio-separator library.
+# The legacy MDXNet engine (mdxnet_models dir + run_mdx) stays removed.
 SEPARATION_SCRIPT = os.path.join(now_dir, 'programs', 'music_separation_code', 'inference.py')
 
 models_vocals = [
@@ -79,6 +81,12 @@ karaoke_models = [
         "config_url": "https://huggingface.co/shiromiya/audio-separation-models/resolve/main/mel_band_roformer_karaoke_aufr33_viperx/config_mel_band_roformer_karaoke.yaml",
         "model_url": "https://huggingface.co/shiromiya/audio-separation-models/resolve/main/mel_band_roformer_karaoke_aufr33_viperx/mel_band_roformer_karaoke_aufr33_viperx_sdr_10.1956.ckpt",
     },
+    {
+        "name": "UVR-BVE",
+        "full_name": "UVR-BVE-4B_SN-44100-1.pth",
+        "arch": "vr",
+        "model_dir": os.path.join(now_dir, "models", "karaoke"),
+    },
 ]
 
 denoise_models = [
@@ -100,6 +108,12 @@ denoise_models = [
         "config_url": "https://huggingface.co/shiromiya/audio-separation-models/resolve/main/mel-denoise/model_mel_band_roformer_denoise.yaml",
         "model_url": "https://huggingface.co/jarredou/aufr33_MelBand_Denoise/resolve/main/denoise_mel_band_roformer_aufr33_aggr_sdr_27.9768.ckpt",
     },
+    {
+        "name": "UVR Denoise",
+        "full_name": "UVR-DeNoise.pth",
+        "arch": "vr",
+        "model_dir": os.path.join(now_dir, "models", "denoise"),
+    },
 ]
 
 dereverb_models = [
@@ -120,6 +134,33 @@ dereverb_models = [
         "type": "bs_roformer",
         "config_url": "https://huggingface.co/anvuew/deverb_bs_roformer/resolve/main/deverb_bs_roformer_8_384dim_10depth.yaml",
         "model_url": "https://huggingface.co/anvuew/deverb_bs_roformer/resolve/main/deverb_bs_roformer_8_384dim_10depth.ckpt",
+    },
+    {
+        "name": "UVR-Deecho-Dereverb",
+        "full_name": "UVR-DeEcho-DeReverb.pth",
+        "arch": "vr",
+        "model_dir": os.path.join(now_dir, "models", "dereverb"),
+    },
+    {
+        "name": "MDX Reverb HQ by FoxJoy",
+        "full_name": "Reverb_HQ_By_FoxJoy.onnx",
+        "arch": "mdx",
+        "model_dir": os.path.join(now_dir, "models", "dereverb"),
+    },
+]
+
+deecho_models = [
+    {
+        "name": "UVR-Deecho-Normal",
+        "full_name": "UVR-De-Echo-Normal.pth",
+        "arch": "vr",
+        "model_dir": os.path.join(now_dir, "models", "deecho"),
+    },
+    {
+        "name": "UVR-Deecho-Agggressive",
+        "full_name": "UVR-De-Echo-Aggressive.pth",
+        "arch": "vr",
+        "model_dir": os.path.join(now_dir, "models", "deecho"),
     },
 ]
 
@@ -272,7 +313,7 @@ def download_file(url, path, filename):
 
 
 def get_model_info_by_name(model_name):
-    all_models = models_vocals + karaoke_models + dereverb_models + denoise_models
+    all_models = models_vocals + karaoke_models + dereverb_models + deecho_models + denoise_models
     for model in all_models:
         if model["name"] == model_name:
             return model
@@ -349,16 +390,34 @@ def disable_amp_if_unsupported(model_info):
                 yaml.safe_dump(cfg, file)
 
 
-def run_separation(model_info, input_file, store_dir, extract_instrumental=False, use_tta=False):
+def run_separation(model_info, input_file, store_dir, extract_instrumental=False, use_tta=False,
+                   output_single_stem=None, batch_size=1):
     """
-    Run one separation step with the MSST inference script located in
-    programs/music_separation_code.
+    Run one separation step. VR/MDX models (UVR-*) are handled by the
+    audio-separator library, while MSST models run through the inference
+    script located in programs/music_separation_code.
     """
     if model_info is None:
         raise Exception("Separation model was not found. Check the model name.")
+    os.makedirs(store_dir, exist_ok=True)
+
+    if "arch" in model_info:
+        # VR / MDX models handled by audio-separator (models auto-download)
+        separator = Separator(
+            model_file_dir=model_info["model_dir"],
+            log_level=logging.WARNING,
+            normalization_threshold=1.0,
+            output_format="flac",
+            output_dir=store_dir,
+            output_single_stem=output_single_stem,
+            vr_params={"batch_size": batch_size, "enable_tta": use_tta},
+        )
+        separator.load_model(model_filename=model_info["full_name"])
+        separator.separate(input_file)
+        return
+
     ensure_model_files(model_info)
     disable_amp_if_unsupported(model_info)
-    os.makedirs(store_dir, exist_ok=True)
 
     command = [
         sys.executable, SEPARATION_SCRIPT,
@@ -382,11 +441,13 @@ def run_separation(model_info, input_file, store_dir, extract_instrumental=False
 
 
 def separate_stems(song_dir, orig_song_path, vocal_model_name, karaoke_model_name,
-                   dereverb_model_name, denoise_model_name, use_dereverb, use_denoise,
-                   use_tta, is_webui, progress):
+                   dereverb_model_name, denoise_model_name, deecho_model_name,
+                   use_dereverb, use_denoise, use_deecho, use_tta, batch_size,
+                   is_webui, progress):
     """
-    Full separation chain (vocals -> karaoke -> dereverb -> denoise) using the
-    music_separation_code models. Skips steps whose outputs are already cached.
+    Full separation chain (vocals -> karaoke -> dereverb -> deecho -> denoise).
+    MSST models run through music_separation_code, VR/MDX models through the
+    audio-separator library. Skips steps whose outputs are already cached.
     """
     music_folder = os.path.splitext(os.path.basename(orig_song_path))[0]
     audio_files_dir = os.path.join(song_dir, "audio_files", music_folder)
@@ -419,7 +480,8 @@ def separate_stems(song_dir, orig_song_path, vocal_model_name, karaoke_model_nam
     os.makedirs(karaoke_dir, exist_ok=True)
     if search_with_word(karaoke_dir, "karaoke") is None:
         karaoke_info = get_model_info_by_name(karaoke_model_name)
-        run_separation(karaoke_info, vocals_path, karaoke_dir, extract_instrumental=True, use_tta=use_tta)
+        run_separation(karaoke_info, vocals_path, karaoke_dir, extract_instrumental=True,
+                       use_tta=use_tta, batch_size=batch_size)
     karaoke_file = search_with_word(karaoke_dir, "karaoke")
     main_vocals_path = os.path.join(karaoke_dir, karaoke_file) if karaoke_file else vocals_path
     backup_file = search_with_two_words(karaoke_dir, music_folder, "instrumental") or search_with_word(karaoke_dir, "instrumental")
@@ -433,20 +495,37 @@ def separate_stems(song_dir, orig_song_path, vocal_model_name, karaoke_model_nam
         os.makedirs(dereverb_dir, exist_ok=True)
         if search_with_word(dereverb_dir, "noreverb") is None:
             dereverb_info = get_model_info_by_name(dereverb_model_name)
-            run_separation(dereverb_info, main_vocals_path, dereverb_dir, use_tta=use_tta)
-        dereverb_file = search_with_word(dereverb_dir, "noreverb")
+            output_single_stem = "No Reverb" if "arch" in dereverb_info else None
+            run_separation(dereverb_info, main_vocals_path, dereverb_dir, use_tta=use_tta,
+                           output_single_stem=output_single_stem, batch_size=batch_size)
+        dereverb_file = search_with_word(dereverb_dir, "noreverb") or search_with_two_words(dereverb_dir, music_folder, "No Reverb")
         if dereverb_file:
             main_vocals_dereverb_path = os.path.join(dereverb_dir, dereverb_file)
 
-    # 4) Denoise the main vocals
+    # 4) Deecho the main vocals
+    if use_deecho and deecho_model_name:
+        display_progress('[~] Removing Echo from Vocals...', 0.35, is_webui, progress)
+        deecho_dir = os.path.join(audio_files_dir, "deecho")
+        os.makedirs(deecho_dir, exist_ok=True)
+        if search_with_word(deecho_dir, "noecho") is None:
+            deecho_info = get_model_info_by_name(deecho_model_name)
+            run_separation(deecho_info, main_vocals_dereverb_path, deecho_dir, use_tta=use_tta,
+                           output_single_stem="No Echo", batch_size=batch_size)
+        deecho_file = search_with_word(deecho_dir, "noecho") or search_with_two_words(deecho_dir, music_folder, "No Echo")
+        if deecho_file:
+            main_vocals_dereverb_path = os.path.join(deecho_dir, deecho_file)
+
+    # 5) Denoise the main vocals
     if use_denoise and denoise_model_name:
         display_progress('[~] Removing Noise from Vocals...', 0.4, is_webui, progress)
         denoise_dir = os.path.join(audio_files_dir, "denoise")
         os.makedirs(denoise_dir, exist_ok=True)
         if search_with_word(denoise_dir, "dry") is None:
             denoise_info = get_model_info_by_name(denoise_model_name)
-            run_separation(denoise_info, main_vocals_dereverb_path, denoise_dir, use_tta=use_tta)
-        denoise_file = search_with_word(denoise_dir, "dry")
+            output_single_stem = "No Noise" if "arch" in denoise_info else None
+            run_separation(denoise_info, main_vocals_dereverb_path, denoise_dir, use_tta=use_tta,
+                           output_single_stem=output_single_stem, batch_size=batch_size)
+        denoise_file = search_with_word(denoise_dir, "dry") or search_with_two_words(denoise_dir, music_folder, "No Noise")
         if denoise_file:
             main_vocals_dereverb_path = os.path.join(denoise_dir, denoise_file)
 
@@ -535,14 +614,16 @@ def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
                         karaoke_model_name="Mel-Roformer Karaoke by aufr33 and viperx",
                         dereverb_model_name="MDX23C DeReverb by aufr33 and jarredou",
                         denoise_model_name="Mel-Roformer Denoise Normal by aufr33",
-                        use_denoise=False, use_dereverb=True,
+                        deecho_model_name="UVR-Deecho-Normal",
+                        use_deecho=False, use_denoise=False, use_dereverb=True,
                         instruments_only=False, backing_vocals_volume=0,
                         inst_pitch_shift=0, export_format_final="mp3",
                         split_audio=False, autotune=False, embedder_model="contentvec",
-                        use_tta=False, progress=gr.Progress()):
+                        batch_size=1, use_tta=False, progress=gr.Progress()):
     """
-    AI cover pipeline: music separation (music_separation_code) -> RVC voice
-    conversion -> audio effects -> final mix.
+    AI cover pipeline: music separation (music_separation_code for MSST models,
+    audio-separator for VR/MDX models) -> RVC voice conversion -> audio
+    effects -> final mix.
     The `steps` parameter is kept for backward compatibility but is unused by
     RVC v2 models.
     """
@@ -577,11 +658,12 @@ def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
 
         start = time.time()
 
-        # Separate all stems with music_separation_code models
+        # Separate all stems (MSST via music_separation_code, VR/MDX via audio-separator)
         vocals_path, instrumentals_path, main_vocals_path, backup_vocals_path, main_vocals_dereverb_path = separate_stems(
             song_dir, orig_song_path, vocal_model_name, karaoke_model_name,
-            dereverb_model_name, denoise_model_name, use_dereverb, use_denoise,
-            use_tta, is_webui, progress
+            dereverb_model_name, denoise_model_name, deecho_model_name,
+            use_dereverb, use_denoise, use_deecho,
+            use_tta, batch_size, is_webui, progress
         )
 
         music_folder = os.path.splitext(os.path.basename(orig_song_path))[0]
@@ -700,6 +782,8 @@ if __name__ == '__main__':
     parser.add_argument('-kmodel', '--karaoke-model', type=str, default='Mel-Roformer Karaoke by aufr33 and viperx', help='Karaoke separation model name.')
     parser.add_argument('-drmodel', '--dereverb-model', type=str, default='MDX23C DeReverb by aufr33 and jarredou', help='Dereverb model name.')
     parser.add_argument('-dnmodel', '--denoise-model', type=str, default='Mel-Roformer Denoise Normal by aufr33', help='Denoise model name.')
+    parser.add_argument('-demodel', '--deecho-model', type=str, default='UVR-Deecho-Normal', help='Deecho model name.')
+    parser.add_argument('-deecho', '--use-deecho', action='store_true', help='Enable deecho.')
     parser.add_argument('-denoise', '--use-denoise', action='store_true', help='Enable denoise.')
     parser.add_argument('-dereverb', '--use-dereverb', action='store_true', default=True, help='Enable dereverb.')
     parser.add_argument('-inst-only', '--instruments-only', action='store_true', help='Output the instrumental only, without voice conversion.')
@@ -708,6 +792,7 @@ if __name__ == '__main__':
     parser.add_argument('-split', '--split-audio', action='store_true', help='Split audio for RVC.')
     parser.add_argument('-autotune', '--autotune', action='store_true', help='Enable autotune for RVC.')
     parser.add_argument('-emb', '--embedder-model', type=str, default='contentvec', help='Embedder model for RVC.')
+    parser.add_argument('-bs', '--batch-size', type=int, default=1, help='Batch size for VR (audio-separator) models.')
     parser.add_argument('-tta', '--use-tta', action='store_true', help='Enable test-time augmentation during separation (slower but cleaner).')
 
     args = parser.parse_args()
@@ -731,6 +816,8 @@ if __name__ == '__main__':
         karaoke_model_name=args.karaoke_model,
         dereverb_model_name=args.dereverb_model,
         denoise_model_name=args.denoise_model,
+        deecho_model_name=args.deecho_model,
+        use_deecho=args.use_deecho,
         use_denoise=args.use_denoise,
         use_dereverb=args.use_dereverb,
         instruments_only=args.instruments_only,
@@ -739,6 +826,7 @@ if __name__ == '__main__':
         split_audio=args.split_audio,
         autotune=args.autotune,
         embedder_model=args.embedder_model,
+        batch_size=args.batch_size,
         use_tta=args.use_tta,
     )
     print(f'[+] Cover generated at {cover_path}')
