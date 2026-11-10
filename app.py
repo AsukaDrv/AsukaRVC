@@ -194,7 +194,7 @@ if __name__ == '__main__':
     dereverb_model_names = [m["name"] for m in dereverb_models]
     deecho_model_names = [m["name"] for m in deecho_models]
 
-    with gr.Blocks(title=f'AsukaRVC V 3', theme=args.theme, fill_width=True, fill_height=False) as app:
+    with gr.Blocks(title=f'AsukaRVC V 3', theme=args.theme, fill_width=True, fill_height=True) as app:
 
         gr.Label(f'AsukaRVC V3 {"ZeroGPU mode" if IS_ZERO_GPU else ""} created with ❤️', show_label=False)
         if IS_ZERO_GPU:
