@@ -37,9 +37,9 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IS_ZERO_GPU = os.getenv("SPACES_ZERO_GPU")
 now_dir = os.getcwd()
 sys.path.append(now_dir)
-mdxnet_models_dir = os.path.join(BASE_DIR, 'mdxnet_models')
-rvc_models_dir = os.path.join(BASE_DIR, 'rvc_models')
-output_dir = os.path.join(BASE_DIR, 'song_output')
+mdxnet_models_dir = os.path.join(now_dir, 'mdxnet_models')
+rvc_models_dir = os.path.join(now_dir, 'rvc_models')
+output_dir = os.path.join(now_dir, 'song_output')
 
 models_vocals = [
     {
