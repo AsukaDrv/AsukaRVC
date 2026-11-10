@@ -32,13 +32,11 @@ from core import (
     karaoke_models,
     denoise_models,
     dereverb_models,
-    deecho_models,
 )
 
 BASE_DIR = os.getcwd()
 IS_ZERO_GPU = os.getenv("SPACES_ZERO_GPU")
 
-mdxnet_models_dir = os.path.join(BASE_DIR, 'mdxnet_models')
 rvc_models_dir = os.path.join(BASE_DIR, 'rvc_models')
 output_dir = os.path.join(BASE_DIR, 'song_output')
 
@@ -192,7 +190,6 @@ if __name__ == '__main__':
     karaoke_model_names = [m["name"] for m in karaoke_models]
     denoise_model_names = [m["name"] for m in denoise_models]
     dereverb_model_names = [m["name"] for m in dereverb_models]
-    deecho_model_names = [m["name"] for m in deecho_models]
 
     with gr.Blocks(title=f'AsukaRVC V 3', theme=args.theme, fill_width=True, fill_height=True) as app:
 
@@ -251,11 +248,9 @@ if __name__ == '__main__':
                 with gr.Row():
                     dereverb_model_name = gr.Dropdown(dereverb_model_names, value=dereverb_model_names[0], label='Dereverb Model')
                     denoise_model_name = gr.Dropdown(denoise_model_names, value=denoise_model_names[0], label='Denoise Model')
-                    deecho_model_name = gr.Dropdown(deecho_model_names, value=deecho_model_names[0], label='Deecho Model')
                 with gr.Row():
                     use_dereverb = gr.Checkbox(value=True, label='Enable Dereverb')
                     use_denoise = gr.Checkbox(value=False, label='Enable Denoise')
-                    use_deecho = gr.Checkbox(value=False, label='Enable Deecho')
                     instruments_only = gr.Checkbox(value=False, label='Instruments Only')
 
             with gr.Accordion('Voice conversion options', open=False):
@@ -343,8 +338,8 @@ if __name__ == '__main__':
                     pitch_all,
                     reverb_rm_size, reverb_wet, reverb_dry, reverb_damping, reverb_width,
                     output_format, extra_denoise, steps,
-                    vocal_model_name, karaoke_model_name, dereverb_model_name, denoise_model_name, deecho_model_name,
-                    use_deecho, use_denoise, use_dereverb,
+                    vocal_model_name, karaoke_model_name, dereverb_model_name, denoise_model_name,
+                    use_denoise, use_dereverb,
                     instruments_only, backing_vocals_volume,
                     inst_pitch_shift,
                     export_format_final,
@@ -353,12 +348,12 @@ if __name__ == '__main__':
                 outputs=[ai_cover]
             )
             clear_btn.click(
-                lambda: [0, 0, 0, 0, 0.5, 3, 0.25, 0.33, 'rmvpe', 128, 0, 0.15, 0.2, 0.8, 0.7, 1.0, 'mp3', 'mp3', None, True, 1, True, False, False, False, 0, 0],
+                lambda: [0, 0, 0, 0, 0.5, 3, 0.25, 0.33, 'rmvpe', 128, 0, 0.15, 0.2, 0.8, 0.7, 1.0, 'mp3', 'mp3', None, True, 1, True, False, False, 0, 0],
                 outputs=[pitch, main_gain, backup_gain, inst_gain, index_rate, filter_radius, rms_mix_rate,
                          protect, f0_method, crepe_hop_length, pitch_all, reverb_rm_size, reverb_wet,
                          reverb_dry, reverb_damping, reverb_width, output_format, export_format_final,
                          ai_cover, extra_denoise, steps,
-                         use_dereverb, use_denoise, use_deecho, instruments_only,
+                         use_dereverb, use_denoise, instruments_only,
                          backing_vocals_volume, inst_pitch_shift]
             )
 

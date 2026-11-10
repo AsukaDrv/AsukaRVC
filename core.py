@@ -3,9 +3,7 @@ import torch
 import argparse
 import gc
 import hashlib
-import json
 import os
-import shlex
 import subprocess
 from contextlib import suppress
 from urllib.parse import urlparse, parse_qs
@@ -24,22 +22,22 @@ from pedalboard import Pedalboard, Reverb, Compressor, HighpassFilter
 from pedalboard.io import AudioFile
 from pydub import AudioSegment
 import noisereduce as nr
-from audio_separator.separator import Separator
 
-from programs.rvc.infer.infer import VoiceConverter
 from programs.rvc.lib.tools.model_download import model_download_pipeline
-from programs.music_separation_code.inference import proc_file
 
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
-# CNFG
+# CONFIG
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IS_ZERO_GPU = os.getenv("SPACES_ZERO_GPU")
 now_dir = os.getcwd()
 sys.path.append(now_dir)
-mdxnet_models_dir = os.path.join(now_dir, 'mdxnet_models')
 rvc_models_dir = os.path.join(now_dir, 'rvc_models')
 output_dir = os.path.join(now_dir, 'song_output')
+
+# All music separation is handled by the MSST-based inference script in
+# programs/music_separation_code (no MDXNet / audio-separator anymore).
+SEPARATION_SCRIPT = os.path.join(now_dir, 'programs', 'music_separation_code', 'inference.py')
 
 models_vocals = [
     {
@@ -81,11 +79,6 @@ karaoke_models = [
         "config_url": "https://huggingface.co/shiromiya/audio-separation-models/resolve/main/mel_band_roformer_karaoke_aufr33_viperx/config_mel_band_roformer_karaoke.yaml",
         "model_url": "https://huggingface.co/shiromiya/audio-separation-models/resolve/main/mel_band_roformer_karaoke_aufr33_viperx/mel_band_roformer_karaoke_aufr33_viperx_sdr_10.1956.ckpt",
     },
-    {
-        "name": "UVR-BVE",
-        "full_name": "UVR-BVE-4B_SN-44100-1.pth",
-        "arch": "vr",
-    },
 ]
 
 denoise_models = [
@@ -107,54 +100,26 @@ denoise_models = [
         "config_url": "https://huggingface.co/shiromiya/audio-separation-models/resolve/main/mel-denoise/model_mel_band_roformer_denoise.yaml",
         "model_url": "https://huggingface.co/jarredou/aufr33_MelBand_Denoise/resolve/main/denoise_mel_band_roformer_aufr33_aggr_sdr_27.9768.ckpt",
     },
-    {
-        "name": "UVR Denoise",
-        "full_name": "UVR-DeNoise.pth",
-        "arch": "vr",
-    },
 ]
 
 dereverb_models = [
     {
         "name": "MDX23C DeReverb by aufr33 and jarredou",
-        "path": os.path.join(now_dir, "models", "mdx23c-dereveb"),
-        "model": os.path.join(now_dir, "models", "mdx23c-dereveb", "model.ckpt"),
-        "config": os.path.join(now_dir, "models", "mdx23c-dereveb", "config.yaml"),
+        "path": os.path.join(now_dir, "models", "mdx23c-dereverb"),
+        "model": os.path.join(now_dir, "models", "mdx23c-dereverb", "model.ckpt"),
+        "config": os.path.join(now_dir, "models", "mdx23c-dereverb", "config.yaml"),
         "type": "mdx23c",
         "config_url": "https://huggingface.co/jarredou/aufr33_jarredou_MDXv3_DeReverb/resolve/main/config_dereverb_mdx23c.yaml",
         "model_url": "https://huggingface.co/jarredou/aufr33_jarredou_MDXv3_DeReverb/resolve/main/dereverb_mdx23c_sdr_6.9096.ckpt",
     },
     {
         "name": "BS-Roformer Dereverb by anvuew",
-        "path": os.path.join(now_dir, "models", "mdx23c-dereveb"),
-        "model": os.path.join(now_dir, "models", "mdx23c-dereveb", "model.ckpt"),
-        "config": os.path.join(now_dir, "models", "mdx23c-dereveb", "config.yaml"),
+        "path": os.path.join(now_dir, "models", "bs-dereverb"),
+        "model": os.path.join(now_dir, "models", "bs-dereverb", "model.ckpt"),
+        "config": os.path.join(now_dir, "models", "bs-dereverb", "config.yaml"),
         "type": "bs_roformer",
         "config_url": "https://huggingface.co/anvuew/deverb_bs_roformer/resolve/main/deverb_bs_roformer_8_384dim_10depth.yaml",
         "model_url": "https://huggingface.co/anvuew/deverb_bs_roformer/resolve/main/deverb_bs_roformer_8_384dim_10depth.ckpt",
-    },
-    {
-        "name": "UVR-Deecho-Dereverb",
-        "full_name": "UVR-DeEcho-DeReverb.pth",
-        "arch": "vr",
-    },
-    {
-        "name": "MDX Reverb HQ by FoxJoy",
-        "full_name": "Reverb_HQ_By_FoxJoy.onnx",
-        "arch": "mdx",
-    },
-]
-
-deecho_models = [
-    {
-        "name": "UVR-Deecho-Normal",
-        "full_name": "UVR-De-Echo-Normal.pth",
-        "arch": "vr",
-    },
-    {
-        "name": "UVR-Deecho-Agggressive",
-        "full_name": "UVR-De-Echo-Aggressive.pth",
-        "arch": "vr",
     },
 ]
 
@@ -238,8 +203,9 @@ def get_rvc_model(voice_model, is_webui):
     rvc_model_filename, rvc_index_filename = None, None
     model_dir = os.path.join(rvc_models_dir, voice_model)
     for file in os.listdir(model_dir):
-        if os.path.isdir(file):
-            for ff in os.listdir(file):
+        # Fix: check directories with their full path, not the bare name
+        if os.path.isdir(os.path.join(model_dir, file)):
+            for ff in os.listdir(os.path.join(model_dir, file)):
                 ext = os.path.splitext(ff)[1]
                 if ext == '.pth':
                     rvc_model_filename = ff
@@ -256,34 +222,11 @@ def get_rvc_model(voice_model, is_webui):
     return os.path.join(model_dir, rvc_model_filename), os.path.join(model_dir, rvc_index_filename) if rvc_index_filename else ''
 
 
-def get_audio_paths(song_dir):
-    orig_song_path = None
-    instrumentals_path = None
-    main_vocals_dereverb_path = None
-    backup_vocals_path = None
-    for file in os.listdir(song_dir):
-        if file.endswith('_Instrumental.wav'):
-            instrumentals_path = os.path.join(song_dir, file)
-            orig_song_path = instrumentals_path.replace('_Instrumental', '')
-        elif file.endswith('_Vocals_Main_DeReverb.wav'):
-            main_vocals_dereverb_path = os.path.join(song_dir, file)
-        elif file.endswith('_Vocals_Backup.wav'):
-            backup_vocals_path = os.path.join(song_dir, file)
-    return orig_song_path, instrumentals_path, main_vocals_dereverb_path, backup_vocals_path
-
-
-def get_audio_with_suffix(song_dir, suffix="_mysuffix.wav"):
-    for file in os.listdir(song_dir):
-        if file.endswith(suffix):
-            return os.path.join(song_dir, file)
-    return None
-
-
 def convert_to_stereo(audio_path):
     wave, sr = librosa.load(audio_path, mono=False, sr=44100)
     if type(wave[0]) != np.ndarray:
         stereo_path = f'{os.path.splitext(audio_path)[0]}_stereo.wav'
-        command = shlex.split(f'ffmpeg -y -loglevel error -i "{audio_path}" -ac 2 -f wav "{stereo_path}"')
+        command = ['ffmpeg', '-y', '-loglevel', 'error', '-i', audio_path, '-ac', '2', '-f', 'wav', stereo_path]
         subprocess.run(command)
         return stereo_path
     return audio_path
@@ -329,7 +272,7 @@ def download_file(url, path, filename):
 
 
 def get_model_info_by_name(model_name):
-    all_models = models_vocals + karaoke_models + dereverb_models + deecho_models + denoise_models
+    all_models = models_vocals + karaoke_models + dereverb_models + denoise_models
     for model in all_models:
         if model["name"] == model_name:
             return model
@@ -354,24 +297,14 @@ def search_with_two_words(folder, word1, word2):
     return max(files, key=lambda f: os.path.getmtime(os.path.join(folder, f)))
 
 
-def get_last_modified_file(folder):
-    if not os.path.isdir(folder):
-        raise NotADirectoryError(f"{folder} is not a valid directory.")
-    files = [f for f in os.listdir(folder) if os.path.isfile(os.path.join(folder, f))]
-    if not files:
-        return None
-    return max(files, key=lambda f: os.path.getmtime(os.path.join(folder, f)))
-
-
 def check_fp16_support(device):
     i_device = int(str(device).split(":")[-1])
     gpu_name = torch.cuda.get_device_name(i_device)
     low_end_gpus = ["16", "P40", "P10", "1060", "1070", "1080"]
     if any(gpu in gpu_name for gpu in low_end_gpus) and "V100" not in gpu_name.upper():
-        print(f"Your GPU {gpu_name} not support FP16 inference. Using FP32 instead.")
+        print(f"Your GPU {gpu_name} does not support FP16 inference. Using FP32 instead.")
         return False
     return True
-
 
 
 def get_audio_file(song_input, is_webui, input_type, progress):
@@ -389,19 +322,162 @@ def get_audio_file(song_input, is_webui, input_type, progress):
 
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
-compute_half = True if torch.cuda.is_available() else False
 config = get_config()
 print(device, "half>>", config.is_half)
 
 
-def voice_change(voice_model, vocals_path, output_path, pitch_change, f0_method, index_rate, filter_radius, rms_mix_rate, protect, crepe_hop_length, is_webui, steps):
+def ensure_model_files(model_info):
+    """Download the checkpoint and config file of a separation model if missing."""
+    if not os.path.exists(model_info["model"]):
+        download_file(model_info["model_url"], model_info["path"], os.path.basename(model_info["model"]))
+    if not os.path.exists(model_info["config"]):
+        download_file(model_info["config_url"], model_info["path"], os.path.basename(model_info["config"]))
+
+
+def disable_amp_if_unsupported(model_info):
+    """Disable AMP in the model config when the GPU does not support FP16."""
+    if torch.cuda.is_available():
+        fp16 = check_fp16_support("cuda:0")
+    else:
+        fp16 = False
+    if not fp16 and "config" in model_info and os.path.exists(model_info["config"]):
+        with open(model_info["config"], "r") as file:
+            cfg = yaml.safe_load(file)
+        if cfg.get("training", {}).get("use_amp", False):
+            cfg["training"]["use_amp"] = False
+            with open(model_info["config"], "w") as file:
+                yaml.safe_dump(cfg, file)
+
+
+def run_separation(model_info, input_file, store_dir, extract_instrumental=False, use_tta=False):
+    """
+    Run one separation step with the MSST inference script located in
+    programs/music_separation_code.
+    """
+    if model_info is None:
+        raise Exception("Separation model was not found. Check the model name.")
+    ensure_model_files(model_info)
+    disable_amp_if_unsupported(model_info)
+    os.makedirs(store_dir, exist_ok=True)
+
+    command = [
+        sys.executable, SEPARATION_SCRIPT,
+        "--model_type", model_info["type"],
+        "--config_path", model_info["config"],
+        "--start_check_point", model_info["model"],
+        "--input_file", input_file,
+        "--store_dir", store_dir,
+        "--flac_file", "--pcm_type", "PCM_16",
+    ]
+    if extract_instrumental:
+        command.append("--extract_instrumental")
+    if use_tta:
+        command.append("--use_tta")
+    if device == "cpu":
+        command.append("--force_cpu")
+
+    result = subprocess.run(command)
+    if result.returncode != 0:
+        raise Exception(f"Separation failed for model '{model_info['name']}' (exit code {result.returncode}).")
+
+
+def separate_stems(song_dir, orig_song_path, vocal_model_name, karaoke_model_name,
+                   dereverb_model_name, denoise_model_name, use_dereverb, use_denoise,
+                   use_tta, is_webui, progress):
+    """
+    Full separation chain (vocals -> karaoke -> dereverb -> denoise) using the
+    music_separation_code models. Skips steps whose outputs are already cached.
+    """
+    music_folder = os.path.splitext(os.path.basename(orig_song_path))[0]
+    audio_files_dir = os.path.join(song_dir, "audio_files", music_folder)
+
+    # 1) Separate vocals from instrumental
+    display_progress('[~] Separating Vocals from Instrumental...', 0.1, is_webui, progress)
+    vocals_dir = os.path.join(audio_files_dir, "vocals")
+    inst_dir = os.path.join(audio_files_dir, "instrumentals")
+    os.makedirs(vocals_dir, exist_ok=True)
+    os.makedirs(inst_dir, exist_ok=True)
+    if search_with_word(vocals_dir, "vocals") is None:
+        vocal_info = get_model_info_by_name(vocal_model_name)
+        run_separation(vocal_info, orig_song_path, vocals_dir, extract_instrumental=True, use_tta=use_tta)
+        inst_result = search_with_two_words(vocals_dir, music_folder, "instrumental")
+        if inst_result:
+            os.rename(
+                os.path.join(vocals_dir, inst_result),
+                os.path.join(inst_dir, f"{music_folder}_instrumentals.flac")
+            )
+    vocals_file = search_with_word(vocals_dir, "vocals")
+    if not vocals_file:
+        raise_exception('Vocals stem was not found after separation.', is_webui)
+    vocals_path = os.path.join(vocals_dir, vocals_file)
+    inst_file_name = search_with_two_words(inst_dir, music_folder, "instrumentals")
+    instrumentals_path = os.path.join(inst_dir, inst_file_name) if inst_file_name else None
+
+    # 2) Separate main vocals from backup vocals
+    display_progress('[~] Separating Main Vocals from Backup Vocals...', 0.2, is_webui, progress)
+    karaoke_dir = os.path.join(audio_files_dir, "karaoke")
+    os.makedirs(karaoke_dir, exist_ok=True)
+    if search_with_word(karaoke_dir, "karaoke") is None:
+        karaoke_info = get_model_info_by_name(karaoke_model_name)
+        run_separation(karaoke_info, vocals_path, karaoke_dir, extract_instrumental=True, use_tta=use_tta)
+    karaoke_file = search_with_word(karaoke_dir, "karaoke")
+    main_vocals_path = os.path.join(karaoke_dir, karaoke_file) if karaoke_file else vocals_path
+    backup_file = search_with_two_words(karaoke_dir, music_folder, "instrumental") or search_with_word(karaoke_dir, "instrumental")
+    backup_vocals_path = os.path.join(karaoke_dir, backup_file) if backup_file else instrumentals_path
+
+    # 3) Dereverb the main vocals
+    main_vocals_dereverb_path = main_vocals_path
+    if use_dereverb and dereverb_model_name:
+        display_progress('[~] Applying DeReverb to Vocals...', 0.3, is_webui, progress)
+        dereverb_dir = os.path.join(audio_files_dir, "dereverb")
+        os.makedirs(dereverb_dir, exist_ok=True)
+        if search_with_word(dereverb_dir, "noreverb") is None:
+            dereverb_info = get_model_info_by_name(dereverb_model_name)
+            run_separation(dereverb_info, main_vocals_path, dereverb_dir, use_tta=use_tta)
+        dereverb_file = search_with_word(dereverb_dir, "noreverb")
+        if dereverb_file:
+            main_vocals_dereverb_path = os.path.join(dereverb_dir, dereverb_file)
+
+    # 4) Denoise the main vocals
+    if use_denoise and denoise_model_name:
+        display_progress('[~] Removing Noise from Vocals...', 0.4, is_webui, progress)
+        denoise_dir = os.path.join(audio_files_dir, "denoise")
+        os.makedirs(denoise_dir, exist_ok=True)
+        if search_with_word(denoise_dir, "dry") is None:
+            denoise_info = get_model_info_by_name(denoise_model_name)
+            run_separation(denoise_info, main_vocals_dereverb_path, denoise_dir, use_tta=use_tta)
+        denoise_file = search_with_word(denoise_dir, "dry")
+        if denoise_file:
+            main_vocals_dereverb_path = os.path.join(denoise_dir, denoise_file)
+
+    return vocals_path, instrumentals_path, main_vocals_path, backup_vocals_path, main_vocals_dereverb_path
+
+
+def voice_change(voice_model, vocals_path, output_path, pitch_change, f0_method, index_rate,
+                 filter_radius, rms_mix_rate, protect, crepe_hop_length, is_webui,
+                 embedder_model="contentvec", split_audio=False, autotune=False):
+    """Convert the dry vocals with the selected RVC voice model."""
     rvc_model_path, rvc_index_path = get_rvc_model(voice_model, is_webui)
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    compute_half = True if torch.cuda.is_available() else False
-    config = get_config()
-    cpt, version, net_g, tgt_sr, vc = get_vc(device, config.is_half, config, rvc_model_path)
-    rvc_infer(rvc_index_path, index_rate, vocals_path, output_path, pitch_change, f0_method, cpt, version, net_g, filter_radius, tgt_sr, rms_mix_rate, protect, crepe_hop_length, vc, hubert_model, steps)
-    del cpt
+    voice_converter = import_voice_converter()
+    voice_converter.convert_audio(
+        audio_input_path=vocals_path,
+        audio_output_path=output_path,
+        model_path=rvc_model_path,
+        index_path=rvc_index_path,
+        embedder_model=embedder_model,
+        pitch=pitch_change,
+        f0_file=None,
+        f0_method=f0_method,
+        index_rate=index_rate,
+        volume_envelope=rms_mix_rate,
+        protect=protect,
+        hop_length=crepe_hop_length,
+        split_audio=split_audio,
+        f0_autotune=autotune,
+        filter_radius=filter_radius,
+        embedder_model_custom=None,
+        export_format="wav",
+    )
     gc.collect()
 
 
@@ -423,18 +499,9 @@ def add_audio_effects(audio_path, reverb_rm_size, reverb_wet, reverb_dry, reverb
 
 def combine_audio(audio_paths, output_path, main_gain, backup_gain, inst_gain, output_format):
     main_vocal_audio = AudioSegment.from_wav(audio_paths[0]) - 4 + main_gain
-    backup_vocal_audio = AudioSegment.from_wav(audio_paths[1]) - 6 + backup_gain
-    instrumental_audio = AudioSegment.from_wav(audio_paths[2]) - 7 + inst_gain
+    backup_vocal_audio = AudioSegment.from_file(audio_paths[1]) - 6 + backup_gain
+    instrumental_audio = AudioSegment.from_file(audio_paths[2]) - 7 + inst_gain
     main_vocal_audio.overlay(backup_vocal_audio).overlay(instrumental_audio).export(output_path, format=output_format)
-
-
-def merge_audios(vocals_path, inst_path, backing_path, output_path, main_gain, inst_gain, backing_vol, output_format):
-    main_vocal_audio = AudioSegment.from_file(vocals_path) + main_gain
-    instrumental_audio = AudioSegment.from_file(inst_path) + inst_gain
-    backing_vocal_audio = AudioSegment.from_file(backing_path) + backing_vol
-    combined_audio = main_vocal_audio.overlay(instrumental_audio.overlay(backing_vocal_audio))
-    combined_audio.export(output_path, format=output_format)
-    return output_path
 
 
 def apply_noisereduce(audio_list, type_output="wav"):
@@ -459,32 +526,6 @@ def apply_noisereduce(audio_list, type_output="wav"):
     return result
 
 
-@spaces.GPU(duration=59)
-def process_song(song_dir, song_input, mdx_model_params, song_id, is_webui, input_type, progress,
-                 keep_files, pitch_change, pitch_change_all, voice_model, index_rate, filter_radius,
-                 rms_mix_rate, protect, f0_method, crepe_hop_length, output_format, keep_orig, orig_song_path, steps):
-    if not os.path.exists(song_dir):
-        os.makedirs(song_dir)
-        orig_song_path, vocals_path, instrumentals_path, main_vocals_path, backup_vocals_path, main_vocals_dereverb_path = preprocess_song(song_input, song_id, is_webui, input_type, progress, keep_orig, orig_song_path)
-    else:
-        vocals_path, main_vocals_path = None, None
-        paths = get_audio_paths(song_dir)
-        if any(path is None for path in paths):
-            orig_song_path, vocals_path, instrumentals_path, main_vocals_path, backup_vocals_path, main_vocals_dereverb_path = preprocess_song(song_input, mdx_model_params, song_id, is_webui, input_type, progress, keep_orig, orig_song_path)
-        else:
-            orig_song_path, instrumentals_path, main_vocals_dereverb_path, backup_vocals_path = paths
-
-    pitch_change = pitch_change * 12 + pitch_change_all
-    ai_vocals_path = os.path.join(song_dir, f'{os.path.splitext(os.path.basename(orig_song_path))[0]}_{voice_model}_p{pitch_change}_i{index_rate}_fr{filter_radius}_rms{rms_mix_rate}_pro{protect}_{f0_method}{"" if f0_method != "mangio-crepe" else f"_{crepe_hop_length}"}_s{steps}.wav')
-    ai_cover_path = os.path.join(song_dir, f'{os.path.splitext(os.path.basename(orig_song_path))[0]} ({voice_model} Ver).{output_format}')
-
-    if not os.path.exists(ai_vocals_path):
-        display_progress('[~] Converting voice using RVC...', 0.5, is_webui, progress)
-        voice_change(voice_model, main_vocals_dereverb_path, ai_vocals_path, pitch_change, f0_method, index_rate, filter_radius, rms_mix_rate, protect, crepe_hop_length, is_webui, steps)
-
-    return ai_vocals_path, ai_cover_path, instrumentals_path, backup_vocals_path, vocals_path, main_vocals_path
-
-
 def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
                         is_webui=0, main_gain=0, backup_gain=0, inst_gain=0, index_rate=0.5, filter_radius=3,
                         rms_mix_rate=0.25, f0_method='rmvpe', crepe_hop_length=128, protect=0.33, pitch_change_all=0,
@@ -494,15 +535,16 @@ def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
                         karaoke_model_name="Mel-Roformer Karaoke by aufr33 and viperx",
                         dereverb_model_name="MDX23C DeReverb by aufr33 and jarredou",
                         denoise_model_name="Mel-Roformer Denoise Normal by aufr33",
-                        deecho=False, deecho_model_name="UVR-Deecho-Normal",
-                        use_deecho=False, use_denoise=False, use_dereverb=True,
+                        use_denoise=False, use_dereverb=True,
                         instruments_only=False, backing_vocals_volume=0,
                         inst_pitch_shift=0, export_format_final="mp3",
                         split_audio=False, autotune=False, embedder_model="contentvec",
-                        batch_size=1, use_tta=False,
-                        progress=gr.Progress()):
+                        use_tta=False, progress=gr.Progress()):
     """
-    Extended song cover pipeline with more separation options.
+    AI cover pipeline: music separation (music_separation_code) -> RVC voice
+    conversion -> audio effects -> final mix.
+    The `steps` parameter is kept for backward compatibility but is unused by
+    RVC v2 models.
     """
     if not keep_files or IS_ZERO_GPU:
         clean_old_folders(output_dir, 14400)
@@ -515,9 +557,6 @@ def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
 
         display_progress('[~] Starting AI Cover Generation Pipeline...', 0, is_webui, progress)
 
-        with open(os.path.join(mdxnet_models_dir, 'model_data.json')) as infile:
-            mdx_model_params = json.load(infile)
-
         # Determine input type
         if urlparse(song_input).scheme == 'https':
             input_type = 'yt'
@@ -526,11 +565,10 @@ def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
                 raise_exception('Invalid YouTube url.', is_webui)
         else:
             input_type = 'local'
-            song_input = song_input.strip('\"')
+            song_input = song_input.strip('"')
             if os.path.exists(song_input):
                 song_id = get_hash(song_input)
             else:
-                song_id = None
                 raise_exception(f'{song_input} does not exist.', is_webui)
 
         song_dir = os.path.join(output_dir, song_id)
@@ -539,289 +577,41 @@ def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
 
         start = time.time()
 
-        # Use advanced separation if any advanced model differs from default
-        use_advanced = (vocal_model_name != "Mel-Roformer by KimberleyJSN" or
-                       karaoke_model_name != "Mel-Roformer Karaoke by aufr33 and viperx" or
-                       use_denoise or use_deecho or use_dereverb or instruments_only)
+        # Separate all stems with music_separation_code models
+        vocals_path, instrumentals_path, main_vocals_path, backup_vocals_path, main_vocals_dereverb_path = separate_stems(
+            song_dir, orig_song_path, vocal_model_name, karaoke_model_name,
+            dereverb_model_name, denoise_model_name, use_dereverb, use_denoise,
+            use_tta, is_webui, progress
+        )
 
-        if use_advanced:
-            # Run advanced pipeline using audio-separator style
-            music_folder = os.path.splitext(os.path.basename(orig_song_path))[0]
-            audio_files_dir = os.path.join(song_dir, "audio_files", music_folder)
-            os.makedirs(audio_files_dir, exist_ok=True)
+        music_folder = os.path.splitext(os.path.basename(orig_song_path))[0]
 
-            if torch.cuda.is_available():
-                n_gpu = torch.cuda.device_count()
-                devices = "0"
-                print(f"Number of GPUs available: {n_gpu}")
-                fp16 = check_fp16_support("cuda:0")
-            else:
-                devices = "cpu"
-                fp16 = False
+        if not instrumentals_path or not os.path.exists(instrumentals_path):
+            raise_exception('Instrumental stem was not found after separation.', is_webui)
 
-            # Vocals Separation
-            display_progress('[~] Separating Vocals from Instrumental...', 0.1, is_webui, progress)
-            model_info = get_model_info_by_name(vocal_model_name)
-            model_ckpt_path = os.path.join(model_info["path"], "model.ckpt")
-            if not os.path.exists(model_ckpt_path):
-                download_file(model_info["model_url"], model_info["path"], "model.ckpt")
-            config_json_path = os.path.join(model_info["path"], "config.yaml")
-            if not os.path.exists(config_json_path):
-                download_file(model_info["config_url"], model_info["path"], "config.yaml")
-            if not fp16 and "config" in model_info:
-                with open(model_info["config"], "r") as file:
-                    cfg = yaml.safe_load(file)
-                cfg["training"]["use_amp"] = False
-                with open(model_info["config"], "w") as file:
-                    yaml.safe_dump(cfg, file)
+        if instruments_only:
+            # Export the instrumental directly without voice conversion
+            inst_output_path = os.path.join(song_dir, f'{music_folder} (Instrumental).{export_format_final}')
+            if pitch_change_all != 0 or inst_pitch_shift != 0:
+                display_progress('[~] Applying pitch change to Instrumental...', 0.85, is_webui, progress)
+                if pitch_change_all != 0:
+                    instrumentals_path = pitch_shift(instrumentals_path, pitch_change_all)
+                if inst_pitch_shift != 0:
+                    instrumentals_path = pitch_shift(instrumentals_path, inst_pitch_shift)
+            AudioSegment.from_file(instrumentals_path).export(inst_output_path, format=export_format_final)
+            display_progress('[+] Instruments Only export finished!', 1.0, is_webui, progress)
+            return inst_output_path
 
-            store_dir = os.path.join(audio_files_dir, "vocals")
-            inst_dir = os.path.join(audio_files_dir, "instrumentals")
-            os.makedirs(store_dir, exist_ok=True)
-            os.makedirs(inst_dir, exist_ok=True)
-
-            search_result = search_with_word(store_dir, "vocals")
-            if not search_result:
-                command = [
-                    "python", os.path.join(now_dir, "programs", "music_separation_code", "inference.py"),
-                    "--model_type", model_info["type"],
-                    "--config_path", model_info["config"],
-                    "--start_check_point", model_info["model"],
-                    "--input_file", orig_song_path,
-                    "--store_dir", store_dir,
-                    "--flac_file", "--pcm_type", "PCM_16",
-                    "--extract_instrumental",
-                ]
-                if devices == "cpu":
-                    command.append("--force_cpu")
-                else:
-                    device_ids = [str(int(d)) for d in devices.split()]
-                    command.extend(["--device_ids"] + device_ids)
-                subprocess.run(command)
-                # Move instrumental to inst_dir
-                inst_result = search_with_two_words(store_dir, music_folder, "instrumental")
-                if inst_result:
-                    os.rename(
-                        os.path.join(store_dir, inst_result),
-                        os.path.join(inst_dir, f"{music_folder}_instrumentals.flac")
-                    )
-            vocals_file = search_with_word(store_dir, "vocals")
-            vocals_path = os.path.join(store_dir, vocals_file)
-            inst_file_name = search_with_two_words(inst_dir, music_folder, "instrumentals")
-            instrumentals_path = os.path.join(inst_dir, inst_file_name) if inst_file_name else None
-
-            # Karaoke separation
-            display_progress('[~] Separating Main Vocals from Backup Vocals...', 0.2, is_webui, progress)
-            karaoke_dir = os.path.join(audio_files_dir, "karaoke")
-            os.makedirs(karaoke_dir, exist_ok=True)
-            karaoke_exists = search_with_word(karaoke_dir, "karaoke") is not None
-
-            if not karaoke_exists:
-                karaoke_info = get_model_info_by_name(karaoke_model_name)
-                if karaoke_info["name"] == "Mel-Roformer Karaoke by aufr33 and viperx":
-                    model_ckpt_path = os.path.join(karaoke_info["path"], "model.ckpt")
-                    if not os.path.exists(model_ckpt_path):
-                        download_file(karaoke_info["model_url"], karaoke_info["path"], "model.ckpt")
-                    config_json_path = os.path.join(karaoke_info["path"], "config.yaml")
-                    if not os.path.exists(config_json_path):
-                        download_file(karaoke_info["config_url"], karaoke_info["path"], "config.yaml")
-                    if not fp16 and "config" in karaoke_info:
-                        with open(karaoke_info["config"], "r") as file:
-                            cfg = yaml.safe_load(file)
-                        cfg["training"]["use_amp"] = False
-                        with open(karaoke_info["config"], "w") as file:
-                            yaml.safe_dump(cfg, file)
-                    command = [
-                        "python", os.path.join(now_dir, "programs", "music_separation_code", "inference.py"),
-                        "--model_type", karaoke_info["type"],
-                        "--config_path", karaoke_info["config"],
-                        "--start_check_point", karaoke_info["model"],
-                        "--input_file", vocals_path,
-                        "--store_dir", karaoke_dir,
-                        "--flac_file", "--pcm_type", "PCM_16",
-                        "--extract_instrumental",
-                    ]
-                    if devices == "cpu":
-                        command.append("--force_cpu")
-                    else:
-                        device_ids = [str(int(d)) for d in devices.split()]
-                        command.extend(["--device_ids"] + device_ids)
-                    subprocess.run(command)
-                else:
-                    separator = Separator(
-                        model_file_dir=os.path.join(now_dir, "models", "karaoke"),
-                        log_level=logging.WARNING,
-                        normalization_threshold=1.0,
-                        output_format="flac",
-                        output_dir=karaoke_dir,
-                        vr_params={"batch_size": batch_size, "enable_tta": use_tta},
-                    )
-                    separator.load_model(model_filename=karaoke_info["full_name"])
-                    separator.separate(vocals_path)
-
-            karaoke_file = search_with_word(karaoke_dir, "karaoke")
-            if karaoke_file:
-                main_vocals_path = os.path.join(karaoke_dir, karaoke_file)
-            else:
-                main_vocals_path = vocals_path
-            backup_vocals_path = search_with_two_words(karaoke_dir, music_folder, "instrumental") or search_with_word(karaoke_dir, "instrumental")
-            if backup_vocals_path:
-                backup_vocals_path = os.path.join(karaoke_dir, backup_vocals_path)
-            else:
-                backup_vocals_path = instrumentals_path
-
-            # Dereverb
-            if use_dereverb and dereverb_model_name:
-                display_progress('[~] Applying DeReverb to Vocals...', 0.3, is_webui, progress)
-                dereverb_dir = os.path.join(audio_files_dir, "dereverb")
-                os.makedirs(dereverb_dir, exist_ok=True)
-                dereverb_exists = search_with_word(dereverb_dir, "noreverb") is not None
-
-                if not dereverb_exists:
-                    dereverb_info = get_model_info_by_name(dereverb_model_name)
-                    if dereverb_info["name"] in ["BS-Roformer Dereverb by anvuew", "MDX23C DeReverb by aufr33 and jarredou"]:
-                        model_ckpt_path = os.path.join(dereverb_info["path"], "model.ckpt")
-                        if not os.path.exists(model_ckpt_path):
-                            download_file(dereverb_info["model_url"], dereverb_info["path"], "model.ckpt")
-                        config_json_path = os.path.join(dereverb_info["path"], "config.yaml")
-                        if not os.path.exists(config_json_path):
-                            download_file(dereverb_info["config_url"], dereverb_info["path"], "config.yaml")
-                        if not fp16 and "config" in dereverb_info:
-                            with open(dereverb_info["config"], "r") as file:
-                                cfg = yaml.safe_load(file)
-                            cfg["training"]["use_amp"] = False
-                            with open(dereverb_info["config"], "w") as file:
-                                yaml.safe_dump(cfg, file)
-                        command = [
-                            "python", os.path.join(now_dir, "programs", "music_separation_code", "inference.py"),
-                            "--model_type", dereverb_info["type"],
-                            "--config_path", dereverb_info["config"],
-                            "--start_check_point", dereverb_info["model"],
-                            "--input_file", main_vocals_path,
-                            "--store_dir", dereverb_dir,
-                            "--flac_file", "--pcm_type", "PCM_16",
-                        ]
-                        if devices == "cpu":
-                            command.append("--force_cpu")
-                        else:
-                            device_ids = [str(int(d)) for d in devices.split()]
-                            command.extend(["--device_ids"] + device_ids)
-                        subprocess.run(command)
-                    else:
-                        separator = Separator(
-                            model_file_dir=os.path.join(now_dir, "models", "dereverb"),
-                            log_level=logging.WARNING,
-                            normalization_threshold=1.0,
-                            output_format="flac",
-                            output_dir=dereverb_dir,
-                            output_single_stem="No Reverb",
-                            vr_params={"batch_size": batch_size, "enable_tta": use_tta},
-                        )
-                        separator.load_model(model_filename=dereverb_info["full_name"])
-                        separator.separate(main_vocals_path)
-                dereverb_file = search_with_word(dereverb_dir, "noreverb") or search_with_two_words(dereverb_dir, music_folder, "No Reverb")
-                if dereverb_file:
-                    main_vocals_dereverb_path = os.path.join(dereverb_dir, dereverb_file)
-                else:
-                    main_vocals_dereverb_path = main_vocals_path
-            else:
-                main_vocals_dereverb_path = main_vocals_path
-
-            # Deecho
-            if use_deecho and deecho_model_name:
-                display_progress('[~] Removing Echo from Vocals...', 0.35, is_webui, progress)
-                deecho_dir = os.path.join(audio_files_dir, "deecho")
-                os.makedirs(deecho_dir, exist_ok=True)
-                deecho_exists = search_with_word(deecho_dir, "noecho") is not None
-                if not deecho_exists:
-                    deecho_info = get_model_info_by_name(deecho_model_name)
-                    separator = Separator(
-                        model_file_dir=os.path.join(now_dir, "models", "deecho"),
-                        log_level=logging.WARNING,
-                        normalization_threshold=1.0,
-                        output_format="flac",
-                        output_dir=deecho_dir,
-                        output_single_stem="No Echo",
-                        vr_params={"batch_size": batch_size, "enable_tta": use_tta},
-                    )
-                    separator.load_model(model_filename=deecho_info["full_name"])
-                    separator.separate(main_vocals_dereverb_path)
-                deecho_file = search_with_word(deecho_dir, "noecho") or search_with_two_words(deecho_dir, music_folder, "No Echo")
-                if deecho_file:
-                    main_vocals_dereverb_path = os.path.join(deecho_dir, deecho_file)
-
-            # Denoise
-            if use_denoise and denoise_model_name:
-                display_progress('[~] Removing Noise from Vocals...', 0.4, is_webui, progress)
-                denoise_dir = os.path.join(audio_files_dir, "denoise")
-                os.makedirs(denoise_dir, exist_ok=True)
-                denoise_exists = search_with_word(denoise_dir, "dry") is not None
-                if not denoise_exists:
-                    denoise_info = get_model_info_by_name(denoise_model_name)
-                    if denoise_info["name"] in ["Mel-Roformer Denoise Normal by aufr33", "Mel-Roformer Denoise Aggressive by aufr33"]:
-                        model_ckpt_path = os.path.join(denoise_info["path"], "model.ckpt")
-                        if not os.path.exists(model_ckpt_path):
-                            download_file(denoise_info["model_url"], denoise_info["path"], "model.ckpt")
-                        config_json_path = os.path.join(denoise_info["path"], "config.yaml")
-                        if not os.path.exists(config_json_path):
-                            download_file(denoise_info["config_url"], denoise_info["path"], "config.yaml")
-                        if not fp16 and "config" in denoise_info:
-                            with open(denoise_info["config"], "r") as file:
-                                cfg = yaml.safe_load(file)
-                            cfg["training"]["use_amp"] = False
-                            with open(denoise_info["config"], "w") as file:
-                                yaml.safe_dump(cfg, file)
-                        command = [
-                            "python", os.path.join(now_dir, "programs", "music_separation_code", "inference.py"),
-                            "--model_type", denoise_info["type"],
-                            "--config_path", denoise_info["config"],
-                            "--start_check_point", denoise_info["model"],
-                            "--input_file", main_vocals_dereverb_path,
-                            "--store_dir", denoise_dir,
-                            "--flac_file", "--pcm_type", "PCM_16",
-                        ]
-                        if devices == "cpu":
-                            command.append("--force_cpu")
-                        else:
-                            device_ids = [str(int(d)) for d in devices.split()]
-                            command.extend(["--device_ids"] + device_ids)
-                        subprocess.run(command)
-                    else:
-                        separator = Separator(
-                            model_file_dir=os.path.join(now_dir, "models", "denoise"),
-                            log_level=logging.WARNING,
-                            normalization_threshold=1.0,
-                            output_format="flac",
-                            output_dir=denoise_dir,
-                            output_single_stem="No Noise",
-                            vr_params={"batch_size": batch_size, "enable_tta": use_tta},
-                        )
-                        separator.load_model(model_filename=denoise_info["full_name"])
-                        separator.separate(main_vocals_dereverb_path)
-                denoise_file = search_with_word(denoise_dir, "dry") or search_with_two_words(denoise_dir, music_folder, "No Noise")
-                if denoise_file:
-                    main_vocals_dereverb_path = os.path.join(denoise_dir, denoise_file)
-
-            vocals_path_final = vocals_path
-            backup_vocals_path_final = backup_vocals_path
-
-        else:
-            # Original MDX pipeline
-            orig_song_path, vocals_path, instrumentals_path, main_vocals_path, backup_vocals_path, main_vocals_dereverb_path = preprocess_song(
-                song_input, mdx_model_params, song_id, is_webui, input_type, progress, keep_orig, orig_song_path
-            )
-            main_vocals_dereverb_path = main_vocals_dereverb_path
-            vocals_path_final = vocals_path
-            backup_vocals_path_final = backup_vocals_path
-
-        # RVC Conversion
+        # RVC conversion
         pitch_change = pitch_change * 12 + pitch_change_all
-        ai_vocals_path = os.path.join(song_dir, f'{os.path.splitext(os.path.basename(orig_song_path))[0]}_{voice_model}_p{pitch_change}_i{index_rate}_fr{filter_radius}_rms{rms_mix_rate}_pro{protect}_{f0_method}{"" if f0_method != "mangio-crepe" else f"_{crepe_hop_length}"}_s{steps}.wav')
-        ai_cover_path = os.path.join(song_dir, f'{os.path.splitext(os.path.basename(orig_song_path))[0]} ({voice_model} Ver).{export_format_final}')
+        ai_vocals_path = os.path.join(song_dir, f'{music_folder}_{voice_model}_p{pitch_change}_i{index_rate}_fr{filter_radius}_rms{rms_mix_rate}_pro{protect}_{f0_method}{"" if f0_method != "mangio-crepe" else f"_{crepe_hop_length}"}.wav')
+        ai_cover_path = os.path.join(song_dir, f'{music_folder} ({voice_model} Ver).{export_format_final}')
 
         if not os.path.exists(ai_vocals_path):
             display_progress('[~] Converting voice using RVC...', 0.5, is_webui, progress)
-            voice_change(voice_model, main_vocals_dereverb_path, ai_vocals_path, pitch_change, f0_method, index_rate, filter_radius, rms_mix_rate, protect, crepe_hop_length, is_webui, steps)
+            voice_change(voice_model, main_vocals_dereverb_path, ai_vocals_path, pitch_change, f0_method,
+                         index_rate, filter_radius, rms_mix_rate, protect, crepe_hop_length, is_webui,
+                         embedder_model, split_audio, autotune)
 
         end = time.time()
         print(f"Execution time: {end - start:.4f} seconds")
@@ -829,7 +619,7 @@ def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
             duration__ = len(f) / f.samplerate
         print(f"Audio duration: {duration__:.2f} seconds")
 
-        # Apply audio effects
+        # Apply audio effects on the AI vocals
         display_progress('[~] Applying audio effects to Vocals...', 0.8, is_webui, progress)
         nr_path = ai_vocals_path
         if extra_denoise:
@@ -837,40 +627,26 @@ def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
 
         ai_vocals_mixed_path = add_audio_effects(ai_vocals_path, reverb_rm_size, reverb_wet, reverb_dry, reverb_damping, reverb_width)
 
-        ins_path = get_audio_with_suffix(song_dir, "_Voiceless.wav")
-        if not ins_path:
-            instrumentals_path, _ = run_mdx(
-                mdx_model_params,
-                os.path.join(output_dir, song_id),
-                os.path.join(mdxnet_models_dir, "UVR-MDX-NET-Inst_HQ_4.onnx"),
-                instrumentals_path,
-                exclude_inversion=True,
-                suffix="Voiceless",
-                denoise=False,
-                keep_orig=True,
-                base_device=("" if IS_ZERO_GPU else "cuda")
-            )
-
         if pitch_change_all != 0 or inst_pitch_shift != 0:
             display_progress('[~] Applying overall pitch change', 0.85, is_webui, progress)
             if pitch_change_all != 0:
                 instrumentals_path = pitch_shift(instrumentals_path, pitch_change_all)
-                backup_vocals_path_final = pitch_shift(backup_vocals_path_final, pitch_change_all)
+                backup_vocals_path = pitch_shift(backup_vocals_path, pitch_change_all)
             if inst_pitch_shift != 0:
                 instrumentals_path = pitch_shift(instrumentals_path, inst_pitch_shift)
 
         # Combine
         display_progress('[~] Combining AI Vocals and Instrumentals...', 0.9, is_webui, progress)
         combine_audio(
-            [ai_vocals_mixed_path, backup_vocals_path_final, instrumentals_path],
+            [ai_vocals_mixed_path, backup_vocals_path, instrumentals_path],
             ai_cover_path, main_gain, backup_gain, inst_gain, export_format_final
         )
 
         if not keep_files:
             display_progress('[~] Removing intermediate audio files...', 0.95, is_webui, progress)
-            intermediate_files = [vocals_path_final, main_vocals_path, ai_vocals_mixed_path, ins_path, nr_path]
+            intermediate_files = [vocals_path, main_vocals_path, ai_vocals_mixed_path, nr_path]
             if pitch_change_all != 0:
-                intermediate_files += [instrumentals_path, backup_vocals_path_final]
+                intermediate_files += [instrumentals_path, backup_vocals_path]
             for file in intermediate_files:
                 if file and os.path.exists(file):
                     os.remove(file)
@@ -919,25 +695,20 @@ if __name__ == '__main__':
     parser.add_argument('-rdamp', '--reverb-damping', type=float, default=0.7, help='Reverb damping between 0 and 1.')
     parser.add_argument('-rwidth', '--reverb-width', type=float, default=1.0, help='Reverb width between 0 and 1.')
     parser.add_argument('-oformat', '--output-format', type=str, default='mp3', help='Output format of audio file. mp3 for smaller file size, wav for best quality.')
-    # Extended options
+    # Separation options (all handled by programs/music_separation_code)
     parser.add_argument('-vmodel', '--vocal-model', type=str, default='Mel-Roformer by KimberleyJSN', help='Vocal separation model name.')
     parser.add_argument('-kmodel', '--karaoke-model', type=str, default='Mel-Roformer Karaoke by aufr33 and viperx', help='Karaoke separation model name.')
     parser.add_argument('-drmodel', '--dereverb-model', type=str, default='MDX23C DeReverb by aufr33 and jarredou', help='Dereverb model name.')
     parser.add_argument('-dnmodel', '--denoise-model', type=str, default='Mel-Roformer Denoise Normal by aufr33', help='Denoise model name.')
-    parser.add_argument('-demodel', '--deecho-model', type=str, default='UVR-Deecho-Normal', help='Deecho model name.')
-    parser.add_argument('-deecho', '--use-deecho', action='store_true', help='Enable deecho.')
     parser.add_argument('-denoise', '--use-denoise', action='store_true', help='Enable denoise.')
     parser.add_argument('-dereverb', '--use-dereverb', action='store_true', default=True, help='Enable dereverb.')
-    parser.add_argument('-inst-only', '--instruments-only', action='store_true', help='Output instruments only.')
-    parser.add_argument('-bvv', '--backing-vocals-volume', type=int, default=0, help='Backing vocals volume in dB.')
+    parser.add_argument('-inst-only', '--instruments-only', action='store_true', help='Output the instrumental only, without voice conversion.')
     parser.add_argument('-ips', '--inst-pitch-shift', type=int, default=0, help='Instrumental pitch shift in semitones.')
     parser.add_argument('-ef', '--export-format-final', type=str, default='mp3', help='Final export format.')
     parser.add_argument('-split', '--split-audio', action='store_true', help='Split audio for RVC.')
     parser.add_argument('-autotune', '--autotune', action='store_true', help='Enable autotune for RVC.')
     parser.add_argument('-emb', '--embedder-model', type=str, default='contentvec', help='Embedder model for RVC.')
-    parser.add_argument('-bs', '--batch-size', type=int, default=1, help='Batch size for separation.')
-    parser.add_argument('-tta', '--use-tta', action='store_true', help='Enable test-time augmentation.')
-    parser.add_argument('-steps', '--steps', type=int, default=1, help='RVC inference steps.')
+    parser.add_argument('-tta', '--use-tta', action='store_true', help='Enable test-time augmentation during separation (slower but cleaner).')
 
     args = parser.parse_args()
 
@@ -960,19 +731,14 @@ if __name__ == '__main__':
         karaoke_model_name=args.karaoke_model,
         dereverb_model_name=args.dereverb_model,
         denoise_model_name=args.denoise_model,
-        deecho_model_name=args.deecho_model,
-        use_deecho=args.use_deecho,
         use_denoise=args.use_denoise,
         use_dereverb=args.use_dereverb,
         instruments_only=args.instruments_only,
-        backing_vocals_volume=args.backing_vocals_volume,
         inst_pitch_shift=args.inst_pitch_shift,
         export_format_final=args.export_format_final,
         split_audio=args.split_audio,
         autotune=args.autotune,
         embedder_model=args.embedder_model,
-        batch_size=args.batch_size,
         use_tta=args.use_tta,
-        steps=args.steps,
     )
     print(f'[+] Cover generated at {cover_path}')
