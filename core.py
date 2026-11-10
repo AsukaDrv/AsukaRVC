@@ -18,6 +18,7 @@ import numpy as np
 import soundfile as sf
 import sox
 import yt_dlp
+import requests
 from pedalboard import Pedalboard, Reverb, Compressor, HighpassFilter
 from pedalboard.io import AudioFile
 from pydub import AudioSegment
@@ -97,7 +98,7 @@ denoise_models = [
         "config": os.path.join(now_dir, "models", "mel-denoise", "config.yaml"),
         "type": "mel_band_roformer",
         "config_url": "https://huggingface.co/shiromiya/audio-separation-models/resolve/main/mel-denoise/model_mel_band_roformer_denoise.yaml",
-        "model_url": "https://huggingface.co/jarredou/aufr33_MelBand_Denoise/resolve/main/denoise_mel_band_roformer_aufr33_sdr_27.9959.ckpt",
+        "model_url": "https://huggingface.co/poiqazwsx/melband-roformer-denoise/resolve/main/denoise_mel_band_roformer_aufr33_sdr_27.9959.ckpt",
     },
     {
         "name": "Mel-Roformer Denoise Aggressive by aufr33",
@@ -106,7 +107,7 @@ denoise_models = [
         "config": os.path.join(now_dir, "models", "mel-denoise-aggr", "config.yaml"),
         "type": "mel_band_roformer",
         "config_url": "https://huggingface.co/shiromiya/audio-separation-models/resolve/main/mel-denoise/model_mel_band_roformer_denoise.yaml",
-        "model_url": "https://huggingface.co/jarredou/aufr33_MelBand_Denoise/resolve/main/denoise_mel_band_roformer_aufr33_aggr_sdr_27.9768.ckpt",
+        "model_url": "https://huggingface.co/poiqazwsx/melband-roformer-denoise/resolve/main/denoise_mel_band_roformer_aufr33_aggr_sdr_27.9768.ckpt",
     },
     {
         "name": "UVR Denoise",
@@ -123,8 +124,8 @@ dereverb_models = [
         "model": os.path.join(now_dir, "models", "mdx23c-dereverb", "model.ckpt"),
         "config": os.path.join(now_dir, "models", "mdx23c-dereverb", "config.yaml"),
         "type": "mdx23c",
-        "config_url": "https://huggingface.co/jarredou/aufr33_jarredou_MDXv3_DeReverb/resolve/main/config_dereverb_mdx23c.yaml",
-        "model_url": "https://huggingface.co/jarredou/aufr33_jarredou_MDXv3_DeReverb/resolve/main/dereverb_mdx23c_sdr_6.9096.ckpt",
+        "config_url": "https://huggingface.co/niobures/MDX/resolve/main/models/aufr33_jarredou_MDXv3_DeReverb/config_dereverb_mdx23c.yaml",
+        "model_url": "https://huggingface.co/niobures/MDX/resolve/main/models/aufr33_jarredou_MDXv3_DeReverb/dereverb_mdx23c_sdr_6.9096.ckpt",
     },
     {
         "name": "BS-Roformer Dereverb by anvuew",
@@ -132,8 +133,8 @@ dereverb_models = [
         "model": os.path.join(now_dir, "models", "bs-dereverb", "model.ckpt"),
         "config": os.path.join(now_dir, "models", "bs-dereverb", "config.yaml"),
         "type": "bs_roformer",
-        "config_url": "https://huggingface.co/anvuew/deverb_bs_roformer/resolve/main/deverb_bs_roformer_8_384dim_10depth.yaml",
-        "model_url": "https://huggingface.co/anvuew/deverb_bs_roformer/resolve/main/deverb_bs_roformer_8_384dim_10depth.ckpt",
+        "config_url": "https://huggingface.co/anvuew/dereverb_bs_roformer/resolve/main/config.yaml",
+        "model_url": "https://huggingface.co/anvuew/dereverb_bs_roformer/resolve/main/dereverb_bs_roformer_anvuew_sdr_22.5050.ckpt",
     },
     {
         "name": "UVR-Deecho-Dereverb",
@@ -305,11 +306,35 @@ def download_file(url, path, filename):
     if os.path.exists(file_path):
         print(f"File '{filename}' already exists at '{path}'.")
         return
+    last_error = None
     try:
         torch.hub.download_url_to_file(url, file_path)
         print(f"File '{filename}' downloaded successfully")
+        return
     except Exception as e:
-        print(f"Error downloading file '{filename}' from '{url}': {e}")
+        last_error = e
+        print(f"torch.hub download failed for '{filename}': {e}")
+    if os.path.exists(file_path):
+        os.remove(file_path)
+    # Fallback: plain HTTPS download with a browser-like user agent.
+    try:
+        tmp_path = file_path + ".part"
+        with requests.get(url, stream=True, timeout=60,
+                          headers={"User-Agent": "Mozilla/5.0"}) as response:
+            response.raise_for_status()
+            with open(tmp_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        f.write(chunk)
+        os.replace(tmp_path, file_path)
+        print(f"File '{filename}' downloaded successfully")
+    except Exception as e:
+        if os.path.exists(file_path + ".part"):
+            os.remove(file_path + ".part")
+        raise Exception(
+            f"Failed to download '{filename}' from '{url}'.\n"
+            f"torch.hub error: {last_error}\nHTTPS fallback error: {e}"
+        )
 
 
 def get_model_info_by_name(model_name):
@@ -381,13 +406,20 @@ def disable_amp_if_unsupported(model_info):
         fp16 = check_fp16_support("cuda:0")
     else:
         fp16 = False
-    if not fp16 and "config" in model_info and os.path.exists(model_info["config"]):
+    if fp16 or "config" not in model_info or not os.path.exists(model_info["config"]):
+        return
+    try:
         with open(model_info["config"], "r") as file:
-            cfg = yaml.safe_load(file)
-        if cfg.get("training", {}).get("use_amp", False):
+            # FullLoader is required: some MSST configs use !!python/tuple tags
+            # that yaml.safe_load cannot handle.
+            cfg = yaml.load(file, Loader=yaml.FullLoader)
+        if cfg and cfg.get("training", {}).get("use_amp", False):
             cfg["training"]["use_amp"] = False
             with open(model_info["config"], "w") as file:
-                yaml.safe_dump(cfg, file)
+                yaml.dump(cfg, file)
+    except Exception as e:
+        # AMP adjustment is an optimization; never block separation over it.
+        print(f"Could not adjust AMP setting for '{model_info.get('name', 'model')}': {e}")
 
 
 def run_separation(model_info, input_file, store_dir, extract_instrumental=False, use_tta=False,
