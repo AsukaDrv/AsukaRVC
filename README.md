@@ -1,30 +1,17 @@
----
-title: AICoverGen
-emoji: 🚀
-colorFrom: red
-colorTo: pink
-sdk: gradio
-sdk_version: 5.44.0
-app_file: app.py
-pinned: false
-license: mit
----
-
-# AICoverGen  
+# AsukaRVC  
 
 ## Overview  
-**AICoverGen** is a WebUI designed to create **AI-powered song covers** with customizable voice models, pitch adjustments, and audio mixing options.  
+**AsukaRVC** is a WebUI designed to create **AI-powered song covers** with customizable voice models, pitch adjustments, and audio mixing options.  
 Built with ❤️ for music enthusiasts and creators, it allows you to transform vocals, generate new covers, and manage models easily.  
 
 | Description | Link |  
 | ----------- | ---- |  
 | 📙 Colab Notebook | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/R3gm/AICoverGen/blob/main/colab_notebook.ipynb) |  
-| 🎉 Repository | [![GitHub Repository](https://img.shields.io/badge/GitHub-Repository-black?style=flat-square&logo=github)](https://github.com/R3gm/AICoverGen) |  
-| 🚀 Online DEMO | [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/r3gm/AICoverGen) |  
+| 🎉 Repository | [![GitHub Repository](https://img.shields.io/badge/GitHub-Repository-black?style=flat-square&logo=github)](https://github.com/AsukaDrv/AsukaRVC) |  
 
 ## Key Functions  
 1. **Voice Models**  
-   - Store models inside the folder: `AICoverGen/rvc_models`.  
+   - Store models inside the folder: `./rvc_models`.  
    - Use the **Refresh Models 🔁** button after adding new ones.  
 
 2. **Audio Input**  
