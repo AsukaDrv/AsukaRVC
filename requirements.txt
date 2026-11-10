@@ -1,39 +1,53 @@
+# Main
 pip>=23.3
+requests>=2.32.3
 wheel
 wget
-torch>=2.3.1
-torchvision>=0.18.1
-torchaudio>=2.3.1
-faiss-cpu==1.7.3; python_version < "3.12"
-faiss-cpu>=1.7.3; python_version >= "3.12"
-transformers>=4.49.0
-scikit-learn
-einops>=0.8.0
-librosa>=0.10.2
-praat-parselmouth
-soundfile>=0.13.0
-numpy>=1.25.2,<2.4
-scipy>=1.15.0
-requests>=2.32.3
 aiohttp
-ffmpy==0.3.1
-ffmpeg-python>=0.2.0
 matplotlib>=3.7.2
-gradio
-yt-dlp
-tqdm>=4.65.0
-onnxruntime; sys_platform == 'darwin'
-onnxruntime-gpu; sys_platform != 'darwin'
-edge-tts>=7.2.7
-fastapi>=0.100.0
-uvicorn>=0.23.0
-python-multipart>=0.0.6
-spaces
-sox
-pedalboard 
+
+
+
+# Toch/ML
+
 noisereduce 
 audio-separator==0.18.0
 ml_collections
 omegaconf
 torchcrepe 
 torchfcpe
+onnxruntime; sys_platform == 'darwin'
+onnxruntime-gpu; sys_platform != 'darwin'
+transformers>=4.49.0
+torch>=2.3.1
+torchvision>=0.18.1
+torchaudio>=2.3.1
+faiss-cpu==1.7.3; python_version < "3.12"
+faiss-cpu>=1.7.3; python_version >= "3.12"
+einops>=0.8.0
+scikit-learn
+
+# Audio
+librosa>=0.10.2
+praat-parselmouth
+soundfile>=0.13.0
+numpy>=1.25.2,<2.4
+scipy>=1.15.0
+ffmpy==0.3.1
+ffmpeg-python>=0.2.0
+
+
+yt-dlp
+tqdm>=4.65.0
+
+edge-tts>=7.2.7
+
+python-multipart>=0.0.6
+sox
+pedalboard 
+
+# UI
+spaces
+gradio
+fastapi>=0.100.0
+uvicorn>=0.23.0
