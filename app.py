@@ -1,9 +1,430 @@
+import json
 import os
-import sys
+import shutil
+import urllib.request
+import zipfile
+from argparse import ArgumentParser
+import spaces
+import gradio as gr
+import logging
 
-os.system("python src/download_models.py")
+def configure_logging_libs(debug=False):
+    modules = [
+        "numba",
+        "httpx",
+        "markdown_it",
+        "fairseq",
+        "faiss",
+    ]
+    try:
+        for module in modules:
+            logging.getLogger(module).setLevel(logging.WARNING)
+        os.environ['TF_CPP_MIN_LOG_LEVEL'] = "3" if not debug else "1"
+    except Exception:
+        pass
 
-args = " ".join(sys.argv[1:])
-cmd = f"python src/webui.py {args}"
+configure_logging_libs()
 
-os.system(cmd)
+from code import (
+    song_cover_pipeline,
+    yt_download,
+    models_vocals,
+    karaoke_models,
+    denoise_models,
+    dereverb_models,
+    deecho_models,
+)
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+IS_ZERO_GPU = os.getenv("SPACES_ZERO_GPU")
+
+mdxnet_models_dir = os.path.join(BASE_DIR, 'mdxnet_models')
+rvc_models_dir = os.path.join(BASE_DIR, 'rvc_models')
+output_dir = os.path.join(BASE_DIR, 'song_output')
+
+
+def get_current_models(models_dir):
+    models_list = os.listdir(models_dir)
+    items_to_remove = ['hubert_base.pt', 'MODELS.txt', 'public_models.json', 'rmvpe.pt']
+    return [item for item in models_list if item not in items_to_remove]
+
+
+def update_models_list():
+    return gr.update(choices=get_current_models(rvc_models_dir))
+
+
+def load_public_models():
+    models_table = []
+    for model in public_models['voice_models']:
+        if model['name'] not in voice_models:
+            models_table.append([model['name'], model['description'], model['credit'], model['url'], ', '.join(model['tags'])])
+    tags = list(public_models['tags'].keys())
+    return gr.update(value=models_table), gr.update(choices=tags)
+
+
+def extract_zip(extraction_folder, zip_name):
+    os.makedirs(extraction_folder)
+    with zipfile.ZipFile(zip_name, 'r') as zip_ref:
+        zip_ref.extractall(extraction_folder)
+    os.remove(zip_name)
+
+    index_filepath, model_filepath = None, None
+    for root, dirs, files in os.walk(extraction_folder):
+        for name in files:
+            if name.endswith('.index') and os.stat(os.path.join(root, name)).st_size > 1024 * 100:
+                index_filepath = os.path.join(root, name)
+            if name.endswith('.pth') and os.stat(os.path.join(root, name)).st_size > 1024 * 1024 * 40:
+                model_filepath = os.path.join(root, name)
+
+    if not model_filepath:
+        raise gr.Error(f'No .pth model file was found in the extracted zip. Please check {extraction_folder}.')
+
+    os.rename(model_filepath, os.path.join(extraction_folder, os.path.basename(model_filepath)))
+    if index_filepath:
+        os.rename(index_filepath, os.path.join(extraction_folder, os.path.basename(index_filepath)))
+
+    for filepath in os.listdir(extraction_folder):
+        if os.path.isdir(os.path.join(extraction_folder, filepath)):
+            shutil.rmtree(os.path.join(extraction_folder, filepath))
+
+
+def download_online_model(url, dir_name, progress=gr.Progress()):
+    try:
+        progress(0, desc=f'[~] Downloading voice model with name {dir_name}...')
+        zip_name = url.split('/')[-1]
+        extraction_folder = os.path.join(rvc_models_dir, dir_name)
+        if os.path.exists(extraction_folder):
+            raise gr.Error(f'Voice model directory {dir_name} already exists! Choose a different name for your voice model.')
+
+        if 'pixeldrain.com' in url:
+            url = f'https://pixeldrain.com/api/file/{zip_name}'
+
+        if "," in url:
+            urls = [u.strip() for u in url.split(",") if u.strip()]
+            os.makedirs(extraction_folder, exist_ok=True)
+            for u in urls:
+                u = u.replace("?download=true", "")
+                file_name = u.split('/')[-1]
+                file_path = os.path.join(extraction_folder, file_name)
+                if not os.path.exists(file_path):
+                    urllib.request.urlretrieve(u, file_path)
+        else:
+            urllib.request.urlretrieve(url, zip_name)
+            progress(0.5, desc='[~] Extracting zip...')
+            extract_zip(extraction_folder, zip_name)
+        return f'[+] {dir_name} Model successfully downloaded!'
+    except Exception as e:
+        raise gr.Error(str(e))
+
+
+def upload_local_model(zip_path, dir_name, progress=gr.Progress()):
+    try:
+        extraction_folder = os.path.join(rvc_models_dir, dir_name)
+        if os.path.exists(extraction_folder):
+            raise gr.Error(f'Voice model directory {dir_name} already exists! Choose a different name for your voice model.')
+        zip_name = zip_path.name
+        progress(0.5, desc='[~] Extracting zip...')
+        extract_zip(extraction_folder, zip_name)
+        return f'[+] {dir_name} Model successfully uploaded!'
+    except Exception as e:
+        raise gr.Error(str(e))
+
+
+def filter_models(tags, query):
+    models_table = []
+    if len(tags) == 0 and len(query) == 0:
+        for model in public_models['voice_models']:
+            models_table.append([model['name'], model['description'], model['credit'], model['url'], model['tags']])
+    elif len(tags) > 0 and len(query) > 0:
+        for model in public_models['voice_models']:
+            if all(tag in model['tags'] for tag in tags):
+                attrs = f"{model['name']} {model['description']} {model['credit']} {' '.join(model['tags'])}".lower()
+                if query.lower() in attrs:
+                    models_table.append([model['name'], model['description'], model['credit'], model['url'], model['tags']])
+    elif len(tags) > 0:
+        for model in public_models['voice_models']:
+            if all(tag in model['tags'] for tag in tags):
+                models_table.append([model['name'], model['description'], model['credit'], model['url'], model['tags']])
+    else:
+        for model in public_models['voice_models']:
+            attrs = f"{model['name']} {model['description']} {model['credit']} {' '.join(model['tags'])}".lower()
+            if query.lower() in attrs:
+                models_table.append([model['name'], model['description'], model['credit'], model['url'], model['tags']])
+    return gr.update(value=models_table)
+
+
+def pub_dl_autofill(pub_models, event: gr.SelectData):
+    return gr.update(value=pub_models.loc[event.index[0], 'URL']), gr.update(value=pub_models.loc[event.index[0], 'Model Name'])
+
+
+def swap_visibility():
+    return gr.update(visible=True), gr.update(visible=False), gr.update(value=''), gr.update(value=None)
+
+
+def process_file_upload(file):
+    return file.name, gr.update(value=file.name)
+
+
+def show_hop_slider(pitch_detection_algo):
+    return gr.update(visible=(pitch_detection_algo == 'crepe'))
+
+
+def show_backing_vocals_rvc_inputs(enable):
+    return gr.update(visible=enable)
+
+
+if __name__ == '__main__':
+    parser = ArgumentParser(description='AsukaRVC V3.', add_help=True)
+    parser.add_argument("--share", action="store_true", dest="share_enabled", default=False, help="Enable sharing")
+    parser.add_argument("--builtin-player", action="store_true", default=False, help="Use the builtin audio player")
+    parser.add_argument("--listen", action="store_true", default=False, help="Make the WebUI reachable from your local network.")
+    parser.add_argument('--listen-host', type=str, help='The hostname that the server will use.')
+    parser.add_argument('--listen-port', type=int, help='The listening port that the server will use.')
+    parser.add_argument('--theme', type=str, default="gradio/base", help='Set the theme (default: base)')
+    parser.add_argument("--ssr", action="store_true", help="Enable SSR (Server-Side Rendering)")
+    args = parser.parse_args()
+
+    voice_models = get_current_models(rvc_models_dir)
+    with open(os.path.join(rvc_models_dir, 'public_models.json'), encoding='utf8') as infile:
+        public_models = json.load(infile)
+
+    vocal_model_names = [m["name"] for m in models_vocals]
+    karaoke_model_names = [m["name"] for m in karaoke_models]
+    denoise_model_names = [m["name"] for m in denoise_models]
+    dereverb_model_names = [m["name"] for m in dereverb_models]
+    deecho_model_names = [m["name"] for m in deecho_models]
+
+    with gr.Blocks(title=f'AsukaRVC V 3', theme=args.theme, fill_width=True, fill_height=False) as app:
+
+        gr.Label(f'AsukaRVC V3 {"ZeroGPU mode" if IS_ZERO_GPU else ""} created with ❤️', show_label=False)
+        if IS_ZERO_GPU:
+            gr.Markdown(
+                """
+                <details>
+                    <summary style="font-size: 1.5em;">⚠️ Important (click to expand)</summary>
+                    <ul>
+                        <li>🚀 This demo use a Zero GPU, which is available only for a limited time. It's recommended to use audio files that are no longer than 5 minutes. If you want to use it without time restrictions, you can duplicate the 'old CPU space'. ⏳</li>
+                    </ul>
+                </details>
+                """
+            )
+            gr.Markdown("Duplicate the old CPU space for use in private: [![Duplicate this Space](https://huggingface.co/datasets/huggingface/badges/raw/main/duplicate-this-space-sm-dark.svg)](https://huggingface.co/spaces/r3gm/AICoverGen_old_stable_cpu?duplicate=true)\n\n")
+
+        with gr.Tab("Generate"):
+
+            with gr.Accordion('Main Options'):
+                with gr.Row():
+                    rvc_model = gr.Dropdown(voice_models, label='Voice Models')
+                    ref_btn = gr.Button('Refresh Models 🔁', variant='primary')
+
+                    with gr.Column(visible=False) as yt_link_col:
+                        song_input = gr.Text(label='Song input')
+                        show_file_upload_button = gr.Button('Upload file instead')
+
+                    with gr.Column(visible=True) as file_upload_col:
+                        audio_extensions = ['.mp3', '.m4a', '.flac', '.wav', '.aac', '.ogg', '.wma', '.alac', '.aiff', '.opus', 'amr']
+                        local_file = gr.File(label='Audio file', interactive=True, type="filepath", file_types=audio_extensions, height=150)
+                        if not IS_ZERO_GPU:
+                            with gr.Row():
+                                with gr.Row(scale=2):
+                                    url_media_gui = gr.Textbox(value="", label="Enter URL", placeholder="www.youtube.com/watch?v=g_9rPvbENUw", lines=1)
+                                with gr.Row(scale=1):
+                                    url_button_gui = gr.Button("Process URL", variant="secondary")
+                            url_button_gui.click(yt_download, [url_media_gui], [local_file])
+                        song_input_file = gr.UploadButton('Upload 📂', file_types=['audio'], variant='primary', visible=False)
+                        show_yt_link_button = gr.Button('Paste YouTube link/Path to local file instead', visible=False)
+                        song_input_file.upload(process_file_upload, inputs=[song_input_file], outputs=[local_file, song_input])
+
+                    with gr.Column():
+                        pitch = gr.Slider(-3, 3, value=0, step=1, label='Pitch Change (Vocals ONLY)')
+                        pitch_all = gr.Slider(-12, 12, value=0, step=1, label='Overall Pitch Change')
+
+                    show_file_upload_button.click(swap_visibility, outputs=[file_upload_col, yt_link_col, song_input, local_file])
+                    show_yt_link_button.click(swap_visibility, outputs=[yt_link_col, file_upload_col, song_input, local_file])
+
+ 
+            with gr.Accordion('Separation Models', open=False):
+                gr.Markdown('### Choose which models to use for each separation step')
+                with gr.Row():
+                    vocal_model_name = gr.Dropdown(vocal_model_names, value=vocal_model_names[0], label='Vocal Separation Model')
+                    karaoke_model_name = gr.Dropdown(karaoke_model_names, value=karaoke_model_names[0], label='Karaoke Model')
+                with gr.Row():
+                    dereverb_model_name = gr.Dropdown(dereverb_model_names, value=dereverb_model_names[0], label='Dereverb Model')
+                    denoise_model_name = gr.Dropdown(denoise_model_names, value=denoise_model_names[0], label='Denoise Model')
+                    deecho_model_name = gr.Dropdown(deecho_model_names, value=deecho_model_names[0], label='Deecho Model')
+                with gr.Row():
+                    use_dereverb = gr.Checkbox(value=True, label='Enable Dereverb')
+                    use_denoise = gr.Checkbox(value=False, label='Enable Denoise')
+                    use_deecho = gr.Checkbox(value=False, label='Enable Deecho')
+                    instruments_only = gr.Checkbox(value=False, label='Instruments Only')
+
+            with gr.Accordion('Voice conversion options', open=False):
+                with gr.Row():
+                    index_rate = gr.Slider(0, 1, value=0.5, label='Index Rate')
+                    filter_radius = gr.Slider(0, 7, value=3, step=1, label='Filter radius')
+                    rms_mix_rate = gr.Slider(0, 1, value=0.25, label='RMS mix rate')
+                    protect = gr.Slider(0, 0.5, value=0.33, label='Protect rate')
+                    with gr.Column():
+                        f0_method = gr.Dropdown(['rmvpe', 'fcpe', 'crepe'], value='rmvpe', label='Pitch detection algorithm')
+                        crepe_hop_length = gr.Slider(32, 320, value=128, step=1, visible=False, label='Crepe hop length')
+                        f0_method.change(show_hop_slider, inputs=f0_method, outputs=crepe_hop_length)
+                with gr.Row():
+                    steps = gr.Slider(minimum=1, maximum=3, label="Steps", value=1, step=1, interactive=True)
+                    extra_denoise = gr.Checkbox(True, label='Denoise')
+                    keep_files = gr.Checkbox((False if IS_ZERO_GPU else True), label='Keep intermediate files', interactive=(False if IS_ZERO_GPU else True))
+
+                with gr.Row():
+                    split_audio = gr.Checkbox(value=False, label='Split Audio')
+                    autotune = gr.Checkbox(value=False, label='Autotune')
+                    embedder_model = gr.Dropdown(['contentvec', 'hubert', 'spin'], value='contentvec', label='Embedder Model')
+
+            with gr.Accordion('Backing Vocals RVC (optional)', open=False):
+                infer_backing_vocals = gr.Checkbox(value=False, label='Infer Backing Vocals with separate RVC model')
+                with gr.Column(visible=False) as backing_rvc_col:
+                    with gr.Row():
+                        infer_backing_vocals_model = gr.Dropdown(voice_models, label='Backing Vocals RVC Model')
+                        infer_backing_vocals_index = gr.Text(label='Backing Vocals Index Path')
+                    with gr.Row():
+                        pitch_back = gr.Slider(-3, 3, value=0, step=1, label='Backing Vocals Pitch Change')
+                        filter_radius_back = gr.Slider(0, 7, value=3, step=1, label='Backing Filter radius')
+                        index_rate_back = gr.Slider(0, 1, value=0.5, label='Backing Index Rate')
+                        rms_mix_rate_back = gr.Slider(0, 1, value=0.25, label='Backing RMS mix rate')
+                    with gr.Row():
+                        protect_back = gr.Slider(0, 0.5, value=0.33, label='Backing Protect rate')
+                        pitch_extract_back = gr.Dropdown(['rmvpe+', 'rmvpe', 'mangio-crepe'], value='rmvpe+', label='Backing Pitch detection')
+                        hop_length_back = gr.Slider(32, 320, value=128, step=1, label='Backing Crepe hop length')
+                        export_format_rvc_back = gr.Dropdown(['wav', 'flac', 'mp3'], value='wav', label='Backing RVC export format')
+                    with gr.Row():
+                        split_audio_back = gr.Checkbox(value=False, label='Backing Split Audio')
+                        autotune_back = gr.Checkbox(value=False, label='Backing Autotune')
+                        embedder_model_back = gr.Dropdown(['contentvec', 'chinese-hubert-base', 'japanese-hubert-base', 'korean-hubert-base'], value='contentvec', label='Backing Embedder Model')
+                infer_backing_vocals.change(show_backing_vocals_rvc_inputs, inputs=infer_backing_vocals, outputs=backing_rvc_col)
+
+            with gr.Accordion('Audio mixing options', open=False):
+                gr.Markdown('### Volume Change (decibels)')
+                with gr.Row():
+                    main_gain = gr.Slider(-20, 20, value=0, step=1, label='Main Vocals')
+                    backup_gain = gr.Slider(-20, 20, value=0, step=1, label='Backup Vocals')
+                    inst_gain = gr.Slider(-20, 20, value=0, step=1, label='Music')
+                    backing_vocals_volume = gr.Slider(-20, 20, value=0, step=1, label='Backing Vocals RVC Volume')
+
+                gr.Markdown('### Reverb Control on AI Vocals')
+                with gr.Row():
+                    reverb_rm_size = gr.Slider(0, 1, value=0.15, label='Room size')
+                    reverb_wet = gr.Slider(0, 1, value=0.2, label='Wetness level')
+                    reverb_dry = gr.Slider(0, 1, value=0.8, label='Dryness level')
+                    reverb_damping = gr.Slider(0, 1, value=0.7, label='Damping level')
+                    reverb_width = gr.Slider(0, 1, value=1.0, label='Width')
+
+                gr.Markdown('### Instrumental')
+                with gr.Row():
+                    inst_pitch_shift = gr.Slider(-12, 12, value=0, step=1, label='Instrumental Pitch Shift')
+
+                gr.Markdown('### Audio Output Format')
+                with gr.Row():
+                    output_format = gr.Dropdown(['mp3', 'wav'], value='mp3', label='RVC output file type')
+                    export_format_final = gr.Dropdown(['mp3', 'wav', 'flac'], value='mp3', label='Final output file type')
+
+            with gr.Row():
+                clear_btn = gr.ClearButton(value='Clear', components=[song_input, rvc_model, keep_files, local_file])
+                generate_btn = gr.Button("Generate", variant='primary')
+                ai_cover = gr.Audio(label='AI Cover')
+                    
+            
+            ref_btn.click(update_models_list, None, outputs=rvc_model)
+            is_webui = gr.Number(value=1, visible=False)
+
+            generate_btn.click(
+                song_cover_pipeline,
+                inputs=[
+                    local_file, rvc_model, pitch, keep_files, is_webui,
+                    main_gain, backup_gain, inst_gain,
+                    index_rate, filter_radius, rms_mix_rate, f0_method, crepe_hop_length, protect,
+                    pitch_all,
+                    reverb_rm_size, reverb_wet, reverb_dry, reverb_damping, reverb_width,
+                    output_format, extra_denoise, steps,
+                    vocal_model_name, karaoke_model_name, dereverb_model_name, denoise_model_name, deecho_model_name,
+                    use_deecho, use_denoise, use_dereverb,
+                    instruments_only, backing_vocals_volume,
+                    inst_pitch_shift,
+                    export_format_final,
+                    split_audio, autotune, embedder_model,
+                ],
+                outputs=[ai_cover]
+            )
+            clear_btn.click(
+                lambda: [0, 0, 0, 0, 0.5, 3, 0.25, 0.33, 'rmvpe', 128, 0, 0.15, 0.2, 0.8, 0.7, 1.0, 'mp3', 'mp3', None, True, 1, True, False, False, False, 0, 0],
+                outputs=[pitch, main_gain, backup_gain, inst_gain, index_rate, filter_radius, rms_mix_rate,
+                         protect, f0_method, crepe_hop_length, pitch_all, reverb_rm_size, reverb_wet,
+                         reverb_dry, reverb_damping, reverb_width, output_format, export_format_final,
+                         ai_cover, extra_denoise, steps,
+                         use_dereverb, use_denoise, use_deecho, instruments_only,
+                         backing_vocals_volume, inst_pitch_shift]
+            )
+
+        with gr.Tab('Download model'):
+            with gr.Tab('From HuggingFace/Pixeldrain URL'):
+                with gr.Row():
+                    model_zip_link = gr.Text(label='Download link to model')
+                    model_name = gr.Text(label='Name your model')
+                with gr.Row():
+                    download_btn = gr.Button('Download 🌐', variant='primary', scale=19)
+                    dl_output_message = gr.Text(label='Output Message', interactive=False, scale=20)
+                download_btn.click(download_online_model, inputs=[model_zip_link, model_name], outputs=dl_output_message)
+                gr.Markdown('## Input Examples')
+                gr.Examples(
+                    [
+                        ['https://huggingface.co/MrDawg/ToothBrushing/resolve/main/ToothBrushing.zip?download=true', 'ToothBrushing'],
+                        ['https://huggingface.co/sail-rvc/Aldeano_Minecraft__RVC_V2_-_500_Epochs_/resolve/main/model.pth?download=true, https://huggingface.co/sail-rvc/Aldeano_Minecraft__RVC_V2_-_500_Epochs_/resolve/main/model.index?download=true', 'Minecraft_Villager'],
+                        ['https://huggingface.co/phant0m4r/LiSA/resolve/main/LiSA.zip', 'Lisa'],
+                        ['https://pixeldrain.com/u/3tJmABXA', 'Gura'],
+                        ['https://huggingface.co/Kit-Lemonfoot/kitlemonfoot_rvc_models/resolve/main/AZKi%20(Hybrid).zip', 'Azki']
+                    ],
+                    [model_zip_link, model_name], [], download_online_model, cache_examples=False,
+                )
+
+            with gr.Tab('From Public Index'):
+                gr.Markdown('## How to use')
+                gr.Markdown('- Click Initialize public models table')
+                gr.Markdown('- Filter models using tags or search bar')
+                gr.Markdown('- Select a row to autofill the download link and model name')
+                gr.Markdown('- Click Download')
+                with gr.Row():
+                    pub_zip_link = gr.Text(label='Download link to model')
+                    pub_model_name = gr.Text(label='Model name')
+                with gr.Row():
+                    download_pub_btn = gr.Button('Download 🌐', variant='primary', scale=19)
+                    pub_dl_output_message = gr.Text(label='Output Message', interactive=False, scale=20)
+                filter_tags = gr.CheckboxGroup(value=[], label='Show voice models with tags', choices=[])
+                search_query = gr.Text(label='Search')
+                load_public_models_button = gr.Button(value='Initialize public models table', variant='primary')
+                public_models_table = gr.DataFrame(value=[], headers=['Model Name', 'Description', 'Credit', 'URL', 'Tags'], label='Available Public Models', interactive=False)
+                public_models_table.select(pub_dl_autofill, inputs=[public_models_table], outputs=[pub_zip_link, pub_model_name])
+                load_public_models_button.click(load_public_models, outputs=[public_models_table, filter_tags])
+                search_query.change(filter_models, inputs=[filter_tags, search_query], outputs=public_models_table)
+                filter_tags.change(filter_models, inputs=[filter_tags, search_query], outputs=public_models_table)
+                download_pub_btn.click(download_online_model, inputs=[pub_zip_link, pub_model_name], outputs=pub_dl_output_message)
+
+        with gr.Tab('Upload model'):
+            gr.Markdown('## Upload locally trained RVC v2 model and index file')
+            gr.Markdown('- Find model file (weights folder) and optional index file (logs/[name] folder)')
+            gr.Markdown('- Compress files into zip file')
+            gr.Markdown('- Upload zip file and give unique name for voice')
+            gr.Markdown('- Click Upload model')
+            with gr.Row():
+                with gr.Column():
+                    zip_file = gr.File(label='Zip file')
+                local_model_name = gr.Text(label='Model name')
+            with gr.Row():
+                model_upload_button = gr.Button('Upload model', variant='primary', scale=19)
+                local_upload_output_message = gr.Text(label='Output Message', interactive=False, scale=20)
+                model_upload_button.click(upload_local_model, inputs=[zip_file, local_model_name], outputs=local_upload_output_message)
+
+    app.launch(
+        share=args.share_enabled,
+        debug=args.share_enabled,
+        show_error=True,
+        server_name=None if not args.listen else (args.listen_host or '0.0.0.0'),
+        server_port=args.listen_port,
+        ssr_mode=args.ssr
+    )
