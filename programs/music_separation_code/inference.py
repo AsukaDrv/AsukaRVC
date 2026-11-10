@@ -221,9 +221,16 @@ def proc_file(args):
             if "state" in state_dict:
                 state_dict = state_dict["state"]
         else:
-            state_dict = torch.load(
-                args.start_check_point, map_location=device, weights_only=True
-            )
+            try:
+                state_dict = torch.load(
+                    args.start_check_point, map_location=device, weights_only=True
+                )
+            except Exception:
+                # Some older checkpoints contain non-tensor objects and cannot
+                # be loaded with weights_only=True; fall back to a full load.
+                state_dict = torch.load(
+                    args.start_check_point, map_location=device, weights_only=False
+                )
         model.load_state_dict(state_dict)
     print("Instruments: {}".format(config.training.instruments))
 

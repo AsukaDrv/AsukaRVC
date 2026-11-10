@@ -33,5 +33,7 @@ sox
 pedalboard 
 noisereduce 
 audio-separator==0.18.0
+ml_collections
+omegaconf
 torchcrepe 
 torchfcpe

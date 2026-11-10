@@ -435,9 +435,29 @@ def run_separation(model_info, input_file, store_dir, extract_instrumental=False
     if device == "cpu":
         command.append("--force_cpu")
 
-    result = subprocess.run(command)
-    if result.returncode != 0:
-        raise Exception(f"Separation failed for model '{model_info['name']}' (exit code {result.returncode}).")
+    # Stream the subprocess output live to the console while keeping a tail
+    # of it, so the real error is visible if the separation script fails.
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        errors="replace",
+        bufsize=1,
+    )
+    output_lines = []
+    assert process.stdout is not None
+    for line in process.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+        output_lines.append(line.rstrip())
+    returncode = process.wait()
+    if returncode != 0:
+        output_tail = "\n".join(output_lines[-30:])
+        raise Exception(
+            f"Separation failed for model '{model_info['name']}' (exit code {returncode}).\n"
+            f"Last output from the separation script:\n{output_tail}"
+        )
 
 
 def separate_stems(song_dir, orig_song_path, vocal_model_name, karaoke_model_name,
