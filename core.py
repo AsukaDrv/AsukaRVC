@@ -401,7 +401,6 @@ def get_audio_file(song_input, is_webui, input_type, progress):
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 compute_half = True if torch.cuda.is_available() else False
 config = get_config()
-hubert_model = load_hubert("cuda", config.is_half, os.path.join(rvc_models_dir, 'hubert_base.pt'))
 print(device, "half>>", config.is_half)
 
 
@@ -411,7 +410,6 @@ def voice_change(voice_model, vocals_path, output_path, pitch_change, f0_method,
     compute_half = True if torch.cuda.is_available() else False
     config = get_config()
     cpt, version, net_g, tgt_sr, vc = get_vc(device, config.is_half, config, rvc_model_path)
-    global hubert_model
     rvc_infer(rvc_index_path, index_rate, vocals_path, output_path, pitch_change, f0_method, cpt, version, net_g, filter_radius, tgt_sr, rms_mix_rate, protect, crepe_hop_length, vc, hubert_model, steps)
     del cpt
     gc.collect()
