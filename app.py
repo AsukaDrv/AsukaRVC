@@ -35,7 +35,7 @@ from core import (
     deecho_models,
 )
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.getcwd()
 IS_ZERO_GPU = os.getenv("SPACES_ZERO_GPU")
 
 mdxnet_models_dir = os.path.join(BASE_DIR, 'mdxnet_models')
