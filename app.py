@@ -1,28 +1,13 @@
-import logging
 import os
 from argparse import ArgumentParser
 
 import spaces
 import gradio as gr
 
-
-def configure_logging_libs(debug=False):
-    modules = [
-        "numba",
-        "httpx",
-        "markdown_it",
-        "fairseq",
-        "faiss",
-    ]
-    try:
-        for module in modules:
-            logging.getLogger(module).setLevel(logging.WARNING)
-        os.environ['TF_CPP_MIN_LOG_LEVEL'] = "3" if not debug else "1"
-    except Exception:
-        pass
-
+from logging_setup import configure_logging_libs, setup_logging
 
 configure_logging_libs()
+setup_logging()
 
 from tabs.common import IS_ZERO_GPU
 from tabs_main import downloader_tab, inference_tab, upload_tab

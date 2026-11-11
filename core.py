@@ -26,8 +26,9 @@ import noisereduce as nr
 from audio_separator.separator import Separator
 
 from programs.rvc.lib.tools.model_download import model_download_pipeline
+from logging_setup import get_logger
 
-logging.getLogger("httpx").setLevel(logging.WARNING)
+logger = get_logger("core")
 
 # CONFIG
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -180,7 +181,7 @@ def get_config():
 
 def clean_old_folders(base_path: str, max_age_seconds: int = 10800):
     if not os.path.isdir(base_path):
-        print(f"Error: {base_path} is not a valid directory.")
+        logger.error("Cannot clean '%s': not a valid directory.", base_path)
         return
     now = time.time()
     for folder_name in os.listdir(base_path):
@@ -297,23 +298,23 @@ def display_progress(message, percent, is_webui, progress=None):
     if is_webui:
         progress(percent, desc=message)
     else:
-        print(message)
+        logger.info(message)
 
 
 def download_file(url, path, filename):
     os.makedirs(path, exist_ok=True)
     file_path = os.path.join(path, filename)
     if os.path.exists(file_path):
-        print(f"File '{filename}' already exists at '{path}'.")
+        logger.debug("File '%s' already exists at '%s'.", filename, path)
         return
     last_error = None
     try:
         torch.hub.download_url_to_file(url, file_path)
-        print(f"File '{filename}' downloaded successfully")
+        logger.info("File '%s' downloaded successfully", filename)
         return
     except Exception as e:
         last_error = e
-        print(f"torch.hub download failed for '{filename}': {e}")
+        logger.warning("torch.hub download failed for '%s': %s", filename, e)
     if os.path.exists(file_path):
         os.remove(file_path)
     # Fallback: plain HTTPS download with a browser-like user agent.
@@ -327,7 +328,7 @@ def download_file(url, path, filename):
                     if chunk:
                         f.write(chunk)
         os.replace(tmp_path, file_path)
-        print(f"File '{filename}' downloaded successfully")
+        logger.info("File '%s' downloaded successfully (HTTPS fallback)", filename)
     except Exception as e:
         if os.path.exists(file_path + ".part"):
             os.remove(file_path + ".part")
@@ -368,7 +369,7 @@ def check_fp16_support(device):
     gpu_name = torch.cuda.get_device_name(i_device)
     low_end_gpus = ["16", "P40", "P10", "1060", "1070", "1080"]
     if any(gpu in gpu_name for gpu in low_end_gpus) and "V100" not in gpu_name.upper():
-        print(f"Your GPU {gpu_name} does not support FP16 inference. Using FP32 instead.")
+        logger.warning("Your GPU %s does not support FP16 inference. Using FP32 instead.", gpu_name)
         return False
     return True
 
@@ -389,7 +390,7 @@ def get_audio_file(song_input, is_webui, input_type, progress):
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 config = get_config()
-print(device, "half>>", config.is_half)
+logger.info("Running on device: %s | half precision: %s", device, config.is_half)
 
 
 def ensure_model_files(model_info):
@@ -419,7 +420,7 @@ def disable_amp_if_unsupported(model_info):
                 yaml.dump(cfg, file)
     except Exception as e:
         # AMP adjustment is an optimization; never block separation over it.
-        print(f"Could not adjust AMP setting for '{model_info.get('name', 'model')}': {e}")
+        logger.warning("Could not adjust AMP setting for '%s': %s", model_info.get('name', 'model'), e)
 
 
 def run_separation(model_info, input_file, store_dir, extract_instrumental=False, use_tta=False,
@@ -435,6 +436,7 @@ def run_separation(model_info, input_file, store_dir, extract_instrumental=False
 
     if "arch" in model_info:
         # VR / MDX models handled by audio-separator (models auto-download)
+        logger.info("Running audio-separator (VR/MDX) for '%s'", model_info["full_name"])
         separator = Separator(
             model_file_dir=model_info["model_dir"],
             log_level=logging.WARNING,
@@ -469,6 +471,7 @@ def run_separation(model_info, input_file, store_dir, extract_instrumental=False
 
     # Stream the subprocess output live to the console while keeping a tail
     # of it, so the real error is visible if the separation script fails.
+    logger.info("Running separation for '%s' (type: %s) on %s", model_info['name'], model_info['type'], 'CPU' if device == 'cpu' else 'GPU')
     process = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
@@ -485,11 +488,13 @@ def run_separation(model_info, input_file, store_dir, extract_instrumental=False
         output_lines.append(line.rstrip())
     returncode = process.wait()
     if returncode != 0:
+        logger.error("Separation failed for model '%s' (exit code %d)", model_info['name'], returncode)
         output_tail = "\n".join(output_lines[-30:])
         raise Exception(
             f"Separation failed for model '{model_info['name']}' (exit code {returncode}).\n"
             f"Last output from the separation script:\n{output_tail}"
         )
+    logger.info("Separation finished for model '%s'", model_info['name'])
 
 
 def separate_stems(song_dir, orig_song_path, vocal_model_name, karaoke_model_name,
@@ -652,7 +657,7 @@ def apply_noisereduce(audio_list, type_output="wav"):
             reduced_audio.export(out_path, format=type_output)
             result.append(out_path)
         except Exception as e:
-            print(f"Error noisereduce: {str(e)}")
+            logger.error("noisereduce failed on '%s': %s — keeping original audio", audio_path, e)
             result.append(audio_path)
     return result
 
@@ -748,10 +753,10 @@ def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
                          embedder_model, split_audio, autotune)
 
         end = time.time()
-        print(f"Execution time: {end - start:.4f} seconds")
+        logger.info("Execution time: %.4f seconds", end - start)
         with sf.SoundFile(ai_vocals_path) as f:
             duration__ = len(f) / f.samplerate
-        print(f"Audio duration: {duration__:.2f} seconds")
+        logger.info("Audio duration: %.2f seconds", duration__)
 
         # Apply audio effects on the AI vocals
         display_progress('[~] Applying audio effects to Vocals...', 0.8, is_webui, progress)
@@ -881,4 +886,4 @@ if __name__ == '__main__':
         batch_size=args.batch_size,
         use_tta=args.use_tta,
     )
-    print(f'[+] Cover generated at {cover_path}')
+    logger.info("[+] Cover generated at %s", cover_path)
