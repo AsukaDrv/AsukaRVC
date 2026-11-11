@@ -84,7 +84,7 @@ class F0Extractor:
             is_half = False if device == "cpu" else config.is_half
             model_rmvpe = RMVPE0Predictor(
                 os.path.join(
-                    "programs", "applio_code", "rvc", "models", "predictors", "rmvpe.pt"
+                    "programs", "rvc", "models", "predictors", "rmvpe.pt"
                 ),
                 is_half=is_half,
                 device=device,

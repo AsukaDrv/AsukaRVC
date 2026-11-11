@@ -266,7 +266,6 @@ class Pipeline:
                 self.model_rmvpe = RMVPE0Predictor(
                     os.path.join(
                         "programs",
-                        "applio_code",
                         "rvc",
                         "models",
                         "predictors",
@@ -281,7 +280,6 @@ class Pipeline:
                 self.model_fcpe = FCPEF0Predictor(
                     os.path.join(
                         "programs",
-                        "applio_code",
                         "rvc",
                         "models",
                         "predictors",
@@ -343,7 +341,7 @@ class Pipeline:
         elif f0_method == "rmvpe":
             self.model_rmvpe = RMVPE0Predictor(
                 os.path.join(
-                    "programs", "applio_code", "rvc", "models", "predictors", "rmvpe.pt"
+                    "programs", "rvc", "models", "predictors", "rmvpe.pt"
                 ),
                 is_half=self.is_half,
                 device=self.device,
@@ -352,7 +350,7 @@ class Pipeline:
         elif f0_method == "fcpe":
             self.model_fcpe = FCPEF0Predictor(
                 os.path.join(
-                    "programs", "applio_code", "rvc", "models", "predictors", "fcpe.pt"
+                    "programs", "rvc", "models", "predictors", "fcpe.pt"
                 ),
                 f0_min=int(self.f0_min),
                 f0_max=int(self.f0_max),

@@ -100,7 +100,7 @@ class Config:
             raise FileNotFoundError("No configuration paths provided.")
 
         full_config_path = os.path.join(
-            "programs", "applio_code", "rvc", "configs", version_config_paths[0]
+            "programs", "rvc", "configs", version_config_paths[0]
         )
         try:
             with open(full_config_path, "r") as f:

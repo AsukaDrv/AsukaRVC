@@ -589,10 +589,53 @@ def separate_stems(song_dir, orig_song_path, vocal_model_name, karaoke_model_nam
     return vocals_path, instrumentals_path, main_vocals_path, backup_vocals_path, main_vocals_dereverb_path
 
 
+PREDICTORS_DIR = os.path.join(now_dir, "programs", "rvc", "models", "predictors")
+PREDICTOR_URLS = {
+    "rmvpe": "https://huggingface.co/IAHispano/Applio/resolve/main/Resources/predictors/rmvpe.pt",
+    "fcpe": "https://huggingface.co/IAHispano/Applio/resolve/main/Resources/predictors/fcpe.pt",
+}
+
+
+def ensure_f0_predictor(f0_method):
+    """Download the F0 predictor checkpoint required by the chosen pitch method."""
+    if "fcpe" in (f0_method or ""):
+        predictor = "fcpe"
+    elif "rmvpe" in (f0_method or ""):
+        predictor = "rmvpe"
+    else:
+        return  # crepe-based methods need no checkpoint file
+    download_file(PREDICTOR_URLS[predictor], PREDICTORS_DIR, f"{predictor}.pt")
+
+
+def upload_audio_to_hf(cover_path, repo_id, token):
+    """Upload a generated cover to a Hugging Face model repository.
+
+    The repo is created (private) if it does not exist yet. Returns the
+    committed file URL on success.
+    """
+    if not repo_id or not token:
+        raise Exception("Both the HF repo id and the HF token are required to upload the result.")
+    from huggingface_hub import HfApi
+
+    api = HfApi(token=token)
+    path_in_repo = f"covers/{os.path.basename(cover_path)}"
+    logger.info("Uploading '%s' to Hugging Face repo '%s' ...", os.path.basename(cover_path), repo_id)
+    api.create_repo(repo_id, repo_type="model", exist_ok=True, private=True)
+    uploaded_url = api.upload_file(
+        path_or_fileobj=cover_path,
+        path_in_repo=path_in_repo,
+        repo_id=repo_id,
+        repo_type="model",
+    )
+    logger.info("Upload finished: %s", uploaded_url)
+    return uploaded_url
+
+
 def voice_change(voice_model, vocals_path, output_path, pitch_change, f0_method, index_rate,
                  filter_radius, rms_mix_rate, protect, crepe_hop_length, is_webui,
                  embedder_model="contentvec", split_audio=False, autotune=False):
     """Convert the dry vocals with the selected RVC voice model."""
+    ensure_f0_predictor(f0_method)
     rvc_model_path, rvc_index_path = get_rvc_model(voice_model, is_webui)
     voice_converter = import_voice_converter()
     voice_converter.convert_audio(
@@ -676,6 +719,7 @@ def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
                         instruments_only=False, backing_vocals_volume=0,
                         inst_pitch_shift=0, export_format_final="mp3",
                         split_audio=False, autotune=False, embedder_model="contentvec",
+                        hf_upload=False, hf_repo_id="", hf_token="",
                         batch_size=1, use_tta=False, progress=gr.Progress()):
     """
     AI cover pipeline: music separation (music_separation_code for MSST models,
@@ -789,6 +833,16 @@ def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
             for file in intermediate_files:
                 if file and os.path.exists(file):
                     os.remove(file)
+
+        if hf_upload:
+            display_progress('[~] Uploading cover to Hugging Face...', 0.97, is_webui, progress)
+            try:
+                uploaded_url = upload_audio_to_hf(ai_cover_path, hf_repo_id, hf_token)
+                logger.info("Cover available at %s", uploaded_url)
+            except Exception as e:
+                logger.error("Hugging Face upload failed: %s", e)
+                if is_webui:
+                    gr.Warning(f"Hugging Face upload failed: {e}")
 
         return ai_cover_path
 

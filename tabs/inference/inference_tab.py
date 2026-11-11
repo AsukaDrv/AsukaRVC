@@ -144,6 +144,13 @@ def inference_tab():
                 output_format = gr.Dropdown(['mp3', 'wav'], value='mp3', label='RVC output file type')
                 export_format_final = gr.Dropdown(['mp3', 'wav', 'flac'], value='mp3', label='Final output file type')
 
+        with gr.Accordion('Hugging Face Upload (optional)', open=False):
+            gr.Markdown('### Push the generated cover to a Hugging Face model repo')
+            hf_upload = gr.Checkbox(value=False, label='Upload result to Hugging Face')
+            with gr.Row():
+                hf_repo_id = gr.Text(label='HF repo (username/repo)', placeholder='your-name/ai-covers')
+                hf_token = gr.Text(label='HF token (write access)', type='password', placeholder='hf_...')
+
         with gr.Row():
             clear_btn = gr.ClearButton(value='Clear', components=[song_input, rvc_model, keep_files, local_file])
             generate_btn = gr.Button("Generate", variant='primary')
@@ -167,6 +174,7 @@ def inference_tab():
                 inst_pitch_shift,
                 export_format_final,
                 split_audio, autotune, embedder_model,
+                hf_upload, hf_repo_id, hf_token,
             ],
             outputs=[ai_cover]
         )
