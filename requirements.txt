@@ -12,6 +12,7 @@ matplotlib>=3.7.2
 
 noisereduce 
 audio-separator==0.18.0
+huggingface_hub
 ml_collections
 omegaconf
 torchcrepe 
