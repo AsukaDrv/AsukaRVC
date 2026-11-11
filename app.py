@@ -43,6 +43,9 @@ if __name__ == '__main__':
         downloader_tab()
         upload_tab()
 
+    print("-----------")
+    print("AsukaRVC V3")
+    print("-----------")
     app.launch(
         share=args.share_enabled,
         debug=args.share_enabled,
