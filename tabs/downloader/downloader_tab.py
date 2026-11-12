@@ -16,11 +16,11 @@ def downloader_tab():
 
         with gr.Tab('From HuggingFace/Pixeldrain URL'):
             with gr.Row():
-                model_zip_link = gr.Text(label='Download link to model')
-                model_name = gr.Text(label='Name your model')
+                model_zip_link = gr.Textbox(label='Download link to model')
+                model_name = gr.Textbox(label='Name your model')
             with gr.Row():
                 download_btn = gr.Button('Download 🌐', variant='primary', scale=19)
-                dl_output_message = gr.Text(label='Output Message', interactive=False, scale=20)
+                dl_output_message = gr.Textbox(label='Output Message', interactive=False, scale=20)
             download_btn.click(download_online_model, inputs=[model_zip_link, model_name], outputs=dl_output_message)
             gr.Markdown('## Input Examples')
             gr.Examples(
@@ -41,8 +41,8 @@ def downloader_tab():
             gr.Markdown('- Select a row to autofill the download link and model name')
             gr.Markdown('- Click Download')
             with gr.Row():
-                pub_zip_link = gr.Text(label='Download link to model')
-                pub_model_name = gr.Text(label='Model name')
+                pub_zip_link = gr.Textbox(label='Download link to model')
+                pub_model_name = gr.Textbox(label='Model name')
             with gr.Row():
                 download_pub_btn = gr.Button('Download 🌐', variant='primary', scale=19)
                 pub_dl_output_message = gr.Text(label='Output Message', interactive=False, scale=20)
