@@ -39,8 +39,7 @@ def inference_tab():
                     show_file_upload_button = gr.Button('Upload file instead')
 
                 with gr.Column(visible=True) as file_upload_col:
-                    local_file = gr.File(label='Audio file', interactive=True]",
-                                         file_types=AUDIO_EXTENSIONS, height=150)
+                    local_file = gr.File(label='Audio file', interactive=True,file_types=AUDIO_EXTENSIONS, height=150)
                     if not IS_ZERO_GPU:
                         with gr.Row():
                             with gr.Row(scale=2):
