@@ -26,13 +26,12 @@ def inference_tab():
     denoise_model_names = separation_model_names['denoise']
     dereverb_model_names = separation_model_names['dereverb']
     deecho_model_names = separation_model_names['deecho']
+    
+    with gr.Tab("Inference"):
 
-    with gr.Tab("Generate"):
-
-        with gr.Accordion('Main Options'):
+        rvc_model = gr.Dropdown(voice_models, label='Voice Models')
+        ref_btn = gr.Button('Refresh Models 🔁', variant='primary')
             with gr.Row():
-                rvc_model = gr.Dropdown(voice_models, label='Voice Models')
-                ref_btn = gr.Button('Refresh Models 🔁', variant='primary')
 
                 with gr.Column(visible=False) as yt_link_col:
                     song_input = gr.Textbox(label='Song input')
@@ -147,8 +146,8 @@ def inference_tab():
             gr.Markdown('### Push the generated cover to a Hugging Face model repo')
             hf_upload = gr.Checkbox(value=False, label='Upload result to Hugging Face')
             with gr.Row():
-                hf_repo_id = gr.Text(label='HF repo (username/repo)', placeholder='your-name/ai-covers')
-                hf_token = gr.Text(label='HF token (write access)', type='password', placeholder='hf_...')
+                hf_repo_id = gr.Textbox(label='HF repo (username/repo)', placeholder='your-name/ai-covers')
+                hf_token = gr.Textbox(label='HF token (write access)', type='password', placeholder='hf_...')
 
         with gr.Row():
             clear_btn = gr.ClearButton(value='Clear', components=[song_input, rvc_model, keep_files, local_file])
