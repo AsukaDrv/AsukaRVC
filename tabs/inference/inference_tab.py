@@ -35,7 +35,7 @@ def inference_tab():
                 ref_btn = gr.Button('Refresh Models 🔁', variant='primary')
 
                 with gr.Column(visible=False) as yt_link_col:
-                    song_input = gr.Text(label='Song input')
+                    song_input = gr.Textbox(label='Song input')
                     show_file_upload_button = gr.Button('Upload file instead')
 
                 with gr.Column(visible=True) as file_upload_col:
@@ -94,7 +94,7 @@ def inference_tab():
             with gr.Row():
                 split_audio = gr.Checkbox(value=False, label='Split Audio')
                 autotune = gr.Checkbox(value=False, label='Autotune')
-                embedder_model = gr.Dropdown(['contentvec', 'hubert', 'spin'], value='contentvec', label='Embedder Model')
+                embedder_model = gr.Dropdown(['contentvec'], value='contentvec', label='Embedder Model')
 
         with gr.Accordion('Backing Vocals RVC (optional)', open=False):
             infer_backing_vocals = gr.Checkbox(value=False, label='Infer Backing Vocals with separate RVC model')
