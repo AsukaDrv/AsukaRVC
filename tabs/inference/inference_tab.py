@@ -100,7 +100,7 @@ def inference_tab():
             with gr.Column(visible=False) as backing_rvc_col:
                 with gr.Row():
                     infer_backing_vocals_model = gr.Dropdown(voice_models, label='Backing Vocals RVC Model')
-                    infer_backing_vocals_index = gr.Text(label='Backing Vocals Index Path')
+                    infer_backing_vocals_index = gr.Textbox(label='Backing Vocals Index Path')
                 with gr.Row():
                     pitch_back = gr.Slider(-3, 3, value=0, step=1, label='Backing Vocals Pitch Change')
                     filter_radius_back = gr.Slider(0, 7, value=3, step=1, label='Backing Filter radius')
