@@ -49,6 +49,6 @@ pedalboard
 
 # UI
 spaces
-gradio
+git+https://huggingface.co/Asukaa02/Gradio
 fastapi>=0.100.0
 uvicorn>=0.23.0
