@@ -16,8 +16,8 @@ def upload_tab():
         with gr.Row():
             with gr.Column():
                 zip_file = gr.File(label='Zip file')
-            local_model_name = gr.Text(label='Model name')
+            local_model_name = gr.Textbox(label='Model name')
         with gr.Row():
             model_upload_button = gr.Button('Upload model', variant='primary', scale=19)
-            local_upload_output_message = gr.Text(label='Output Message', interactive=False, scale=20)
+            local_upload_output_message = gr.Textbox(label='Output Message', interactive=False, scale=20)
             model_upload_button.click(upload_local_model, inputs=[zip_file, local_model_name], outputs=local_upload_output_message)
