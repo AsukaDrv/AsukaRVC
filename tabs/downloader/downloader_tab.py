@@ -45,7 +45,7 @@ def downloader_tab():
                 pub_model_name = gr.Textbox(label='Model name')
             with gr.Row():
                 download_pub_btn = gr.Button('Download 🌐', variant='primary', scale=19)
-                pub_dl_output_message = gr.Text(label='Output Message', interactive=False, scale=20)
+                pub_dl_output_message = gr.Textbox(label='Output Message', interactive=False, scale=20)
             filter_tags = gr.CheckboxGroup(value=[], label='Show voice models with tags', choices=[])
             search_query = gr.Textbox(label='Search')
             load_public_models_button = gr.Button(value='Initialize public models table', variant='primary')
