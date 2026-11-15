@@ -1,5 +1,3 @@
-"""Builder for the "Generate" tab of the AsukaRVC WebUI."""
-
 import gradio as gr
 
 from core import song_cover_pipeline, yt_download
@@ -26,37 +24,38 @@ def inference_tab():
     denoise_model_names = separation_model_names['denoise']
     dereverb_model_names = separation_model_names['dereverb']
     deecho_model_names = separation_model_names['deecho']
-    
+
     with gr.Tab("Inference"):
 
         rvc_model = gr.Dropdown(voice_models, label='Voice Models')
         ref_btn = gr.Button('Refresh Models 🔁', variant='primary')
-            with gr.Row():
 
-                with gr.Column(visible=False) as yt_link_col:
-                    song_input = gr.Textbox(label='Song input')
-                    show_file_upload_button = gr.Button('Upload file instead')
+        with gr.Row():
 
-                with gr.Column(visible=True) as file_upload_col:
-                    local_file = gr.File(label='Audio file', interactive=True,file_types=AUDIO_EXTENSIONS, height=150)
-                    if not IS_ZERO_GPU:
-                        with gr.Row():
-                            with gr.Row(scale=2):
-                                url_media_gui = gr.Textbox(value="", label="Enter URL",
-                                                           placeholder="www.youtube.com/watch?v=g_9rPvbENUw", lines=1)
-                            with gr.Row(scale=1):
-                                url_button_gui = gr.Button("Process URL", variant="secondary")
-                        url_button_gui.click(yt_download, [url_media_gui], [local_file])
-                    song_input_file = gr.UploadButton('Upload 📂', file_types=['audio'], variant='primary', visible=False)
-                    show_yt_link_button = gr.Button('Paste YouTube link/Path to local file instead', visible=False)
-                    song_input_file.upload(process_file_upload, inputs=[song_input_file], outputs=[local_file, song_input])
+            with gr.Column(visible=False) as yt_link_col:
+                song_input = gr.Textbox(label='Song input')
+                show_file_upload_button = gr.Button('Upload file instead')
 
-                with gr.Column():
-                    pitch = gr.Slider(-3, 3, value=0, step=1, label='Pitch Change (Vocals ONLY)')
-                    pitch_all = gr.Slider(-12, 12, value=0, step=1, label='Overall Pitch Change')
+            with gr.Column(visible=True) as file_upload_col:
+                local_file = gr.File(label='Audio file', interactive=True, file_types=AUDIO_EXTENSIONS, height=150)
+                if not IS_ZERO_GPU:
+                    with gr.Row():
+                        with gr.Row(scale=2):
+                            url_media_gui = gr.Textbox(value="", label="Enter URL",
+                                                       placeholder="www.youtube.com/watch?v=g_9rPvbENUw", lines=1)
+                        with gr.Row(scale=1):
+                            url_button_gui = gr.Button("Process URL", variant="secondary")
+                    url_button_gui.click(yt_download, [url_media_gui], [local_file])
+                song_input_file = gr.UploadButton('Upload 📂', file_types=['audio'], variant='primary', visible=False)
+                show_yt_link_button = gr.Button('Paste YouTube link/Path to local file instead', visible=False)
+                song_input_file.upload(process_file_upload, inputs=[song_input_file], outputs=[local_file, song_input])
 
-                show_file_upload_button.click(swap_visibility, outputs=[file_upload_col, yt_link_col, song_input, local_file])
-                show_yt_link_button.click(swap_visibility, outputs=[yt_link_col, file_upload_col, song_input, local_file])
+            with gr.Column():
+                pitch = gr.Slider(-3, 3, value=0, step=1, label='Pitch Change (Vocals ONLY)')
+                pitch_all = gr.Slider(-12, 12, value=0, step=1, label='Overall Pitch Change')
+
+            show_file_upload_button.click(swap_visibility, outputs=[file_upload_col, yt_link_col, song_input, local_file])
+            show_yt_link_button.click(swap_visibility, outputs=[yt_link_col, file_upload_col, song_input, local_file])
 
         with gr.Accordion('Separation Models', open=False):
             gr.Markdown('### Choose which models to use for each separation step')
