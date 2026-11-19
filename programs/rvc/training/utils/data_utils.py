@@ -5,7 +5,7 @@ import soundfile as sf
 import torch
 import torch.utils.data
 
-from rvc.training.mel_processing import spectrogram_torch
+from programs.rvc.training.mel_processing import spectrogram_torch
 
 
 def load_wav_to_torch(full_path):

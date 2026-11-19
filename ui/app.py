@@ -9,8 +9,12 @@ from config.logging_setup import configure_logging_libs, setup_logging
 configure_logging_libs()
 setup_logging()
 
-from ui.tabs.common import IS_ZERO_GPU
-from ui.tabs.tabs_main import downloader_tab, inference_tab, upload_tab
+from ui.tabs.common import IS_ZERO_GPU, ensure_rvc_models_dir
+from ui.tabs.tabs_main import downloader_tab, inference_tab, training_tab, upload_tab
+
+# Make sure the voice model workspace (rvc_models dir + public index files)
+# exists before any tab lists its contents.
+ensure_rvc_models_dir()
 
 if __name__ == '__main__':
     parser = ArgumentParser(description='AsukaRVC V3.', add_help=True)
@@ -42,6 +46,7 @@ if __name__ == '__main__':
         inference_tab()
         downloader_tab()
         upload_tab()
+        training_tab()
 
     print("-----------")
     print("AsukaRVC V3")

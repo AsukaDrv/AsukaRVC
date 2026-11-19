@@ -12,6 +12,13 @@ rvc_models/rmvpe.pt
 song_output/*/*.wav
 song_output/*/*.mp3
 
+# Seed files copied at runtime from assets/rvc_models by ensure_rvc_models_dir()
+rvc_models/MODELS.txt
+rvc_models/public_models.json
+
+# Training artifacts
+logs/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -28,8 +35,10 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Build outputs - anchored to the repository root so the programs/rvc/lib
+# source package is versioned instead of being silently ignored.
+/lib/
+/lib64/
 parts/
 sdist/
 var/

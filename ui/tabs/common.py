@@ -17,11 +17,32 @@ output_dir = os.path.join(BASE_DIR, 'song_output')
 _public_models_cache = None
 
 AUDIO_EXTENSIONS = ['.mp3', '.m4a', '.flac', '.wav', '.aac', '.ogg',
-                    '.wma', '.alac', '.aiff', '.opus', 'amr']
+                    '.wma', '.alac', '.aiff', '.opus', '.amr']
+
+# Files shipped in assets/rvc_models that populate a fresh rvc_models dir.
+_SEED_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'assets', 'rvc_models')
+_SEED_FILES = ['MODELS.txt', 'public_models.json']
+
+
+def ensure_rvc_models_dir():
+    """Create the rvc_models workspace and seed it with the public index files.
+
+    A fresh clone has no ``rvc_models`` directory at the repository root; the
+    Inference tab (voice models dropdown) and the Download model tab (public
+    models table) both read from it, so it must exist and contain the seed
+    files bundled under ``assets/rvc_models``.
+    """
+    os.makedirs(rvc_models_dir, exist_ok=True)
+    for seed_name in _SEED_FILES:
+        seed_source = os.path.join(_SEED_DIR, seed_name)
+        seed_target = os.path.join(rvc_models_dir, seed_name)
+        if os.path.isfile(seed_source) and not os.path.isfile(seed_target):
+            shutil.copyfile(seed_source, seed_target)
 
 
 def get_current_models(models_dir):
     """List installed voice models, excluding base/helper files."""
+    ensure_rvc_models_dir()
     models_list = os.listdir(models_dir)
     items_to_remove = ['hubert_base.pt', 'MODELS.txt', 'public_models.json', 'rmvpe.pt']
     return [item for item in models_list if item not in items_to_remove]
@@ -34,6 +55,7 @@ def update_models_list():
 
 def load_public_models_json():
     """Load and cache public_models.json from the rvc_models directory."""
+    ensure_rvc_models_dir()
     global _public_models_cache
     if _public_models_cache is None:
         with open(os.path.join(rvc_models_dir, 'public_models.json'), encoding='utf8') as infile:
@@ -173,7 +195,7 @@ def show_backing_vocals_rvc_inputs(enable):
 
 def get_separation_model_names():
     """Return the dropdown names of every separation model group."""
-    from core import models_vocals, karaoke_models, dereverb_models, denoise_models, deecho_models
+    from programs.core import models_vocals, karaoke_models, dereverb_models, denoise_models, deecho_models
     return {
         'vocals': [m['name'] for m in models_vocals],
         'karaoke': [m['name'] for m in karaoke_models],

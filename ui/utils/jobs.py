@@ -15,7 +15,9 @@ from collections import deque
 
 import gradio as gr
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Repository root (ui/utils/jobs.py -> ui -> project root): subprocesses run
+# with this working directory so `python -m programs.rvc.training...` resolves.
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 TAIL_LINES = 200  # How many last lines of the log to show
 
 _lock = threading.Lock()
@@ -95,10 +97,10 @@ def request_stop() -> str:
 def _release_inference_cache() -> None:
     """Frees the inference cache: the training process needs all the GPU memory.
 
-    The import is lazy — `rvc.inference.infer` pulls in torch, and the interface starts without it.
+    The import is lazy — `programs.rvc.infer.infer` pulls in torch, and the interface starts without it.
     """
     try:
-        from rvc.inference.infer import release_pipeline
+        from programs.rvc.infer.infer import release_pipeline
     except Exception:  # noqa: BLE001 — without torch/dependencies there is nothing to unload
         return
     released = release_pipeline()

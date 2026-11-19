@@ -8,12 +8,12 @@ from matplotlib.colors import Normalize
 
 
 def plot_spectrogram_to_numpy(spectrogram, figsize=(10, 4), cmap="viridis"):
-    """Визуализация Mel-спектрограммы."""
+    """Render a Mel spectrogram to a numpy image (HWC uint8)."""
     fig, ax = plt.subplots(figsize=figsize)
     im = ax.imshow(spectrogram, aspect="auto", origin="lower", cmap=cmap, norm=Normalize(vmin=-10, vmax=0))
     plt.colorbar(im, ax=ax, format="%+2.0f dB")
-    plt.xlabel("Кадры")
-    plt.ylabel("Частотные каналы")
+    plt.xlabel("Frames")
+    plt.ylabel("Frequency channels")
     plt.tight_layout()
 
     fig.canvas.draw()
@@ -24,7 +24,7 @@ def plot_spectrogram_to_numpy(spectrogram, figsize=(10, 4), cmap="viridis"):
 
 
 def mel_spectrogram_similarity(y_hat_mel, y_mel):
-    """Сходство между сгенерированной и реальной мел-спектрограммами"""
+    """Similarity (0-100) between the generated and the real Mel spectrograms."""
     device = y_hat_mel.device
     y_mel = y_mel.to(device)
 
@@ -39,11 +39,11 @@ def mel_spectrogram_similarity(y_hat_mel, y_mel):
 
 
 def _estimate_f0_autocorr(wav, sample_rate, hop_length, f0_min=50.0, f0_max=1100.0, frame_ms=40.0):
-    """Быстрая оценка F0 через автокорреляцию для онлайн-метрики."""
+    """Fast autocorrelation F0 estimate for the online metric."""
     wav = wav.squeeze(1) if wav.dim() == 3 else wav
     original_device = wav.device
 
-    # На MPS torch.fft в некоторых версиях PyTorch может быть нестабилен/недоступен.
+    # torch.fft can be unstable/unavailable on MPS in some PyTorch versions.
     wav = wav.detach().float().cpu() if wav.device.type == "mps" else wav.detach().float()
 
     frame_length = int(sample_rate * frame_ms / 1000.0)
@@ -78,7 +78,7 @@ def _estimate_f0_autocorr(wav, sample_rate, hop_length, f0_min=50.0, f0_max=1100
 
 
 def _slice_pitch(pitchf, ids_slice, segment_frames, device):
-    """Берет тот же срез pitchf, что и аудио-сегмент для y_hat."""
+    """Take the same pitchf slice as the audio segment used for y_hat."""
     target = pitchf.unsqueeze(1)
     target_slices = []
     for idx, start in enumerate(ids_slice.tolist()):
@@ -90,10 +90,10 @@ def _slice_pitch(pitchf, ids_slice, segment_frames, device):
 
 
 def f0_error_cents(y_hat, pitchf, ids_slice, sample_rate, hop_length, segment_frames):
-    """Средняя ошибка F0 в центах между сгенерированным аудио и pitchf датасета.
+    """Average F0 error in cents between generated audio and the dataset pitchf.
 
-    Меньше = лучше. 100 cents = 1 полутон. Метрика считается только на voiced
-    кадрах, где и y_hat, и target pitchf имеют ненулевой F0.
+    Lower is better. 100 cents = 1 semitone. The metric is computed only on
+    voiced frames where both the y_hat F0 and the target pitchf are non-zero.
     """
     fake_f0 = _estimate_f0_autocorr(y_hat, sample_rate, hop_length)
     target_f0 = _slice_pitch(pitchf, ids_slice, segment_frames, fake_f0.device)

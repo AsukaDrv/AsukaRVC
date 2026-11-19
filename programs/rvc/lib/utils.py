@@ -7,8 +7,12 @@ import wget
 from torch import nn
 
 import logging
-from transformers import HubertModel
 import warnings
+
+try:
+    from transformers import HubertModel
+except ImportError:  # transformers is optional at import time: the training
+    HubertModel = None  # preprocessing only needs load_audio, not the embedder
 
 # Remove this to see warnings about transformers models
 warnings.filterwarnings("ignore")
@@ -21,14 +25,27 @@ logging.getLogger("torch").setLevel(logging.ERROR)
 now_dir = os.getcwd()
 sys.path.append(now_dir)
 
+# Embedder storage root, resolved relative to this file so feature extraction
+# works regardless of the process working directory.
+_EMBEDDERS_ROOT = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "models",
+    "embedders",
+)
+
 base_path = os.path.join(now_dir, "rvc", "models", "formant", "stftpitchshift")
 stft = base_path + ".exe" if sys.platform == "win32" else base_path
 
 
-class HubertModelWithFinalProj(HubertModel):
-    def __init__(self, config):
-        super().__init__(config)
-        self.final_proj = nn.Linear(config.hidden_size, config.classifier_proj_size)
+if HubertModel is not None:
+    class HubertModelWithFinalProj(HubertModel):
+        """HuBERT model with the ContentVec projection head (v1 feature space)."""
+
+        def __init__(self, config):
+            super().__init__(config)
+            self.final_proj = nn.Linear(config.hidden_size, config.classifier_proj_size)
+else:
+    HubertModelWithFinalProj = None
 
 
 def load_audio(file, sample_rate):
@@ -68,9 +85,12 @@ def format_title(title):
 
 
 def load_embedding(embedder_model, custom_embedder=None):
-    embedder_root = os.path.join(
-        now_dir, "programs", "rvc", "models", "embedders"
-    )
+    if HubertModel is None:
+        raise RuntimeError(
+            "The 'transformers' package is required to load embedder models. "
+            "Install the project requirements (pip install -r requirements.txt)."
+        )
+    embedder_root = _EMBEDDERS_ROOT
     embedding_list = {
         "contentvec": os.path.join(embedder_root, "contentvec"),
         "chinese-hubert-base": os.path.join(embedder_root, "chinese_hubert_base"),

@@ -21,6 +21,12 @@ import logging
 
 logging.getLogger("faiss").setLevel(logging.WARNING)
 
+# Directory holding the F0 predictor checkpoints (rmvpe.pt / fcpe.pt).
+# Resolved relative to this file so inference works from any working directory.
+PREDICTORS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "predictors"
+)
+
 # Constants for high-pass filter
 FILTER_ORDER = 5
 CUTOFF_FREQUENCY = 48  # Hz
@@ -249,7 +255,7 @@ class Pipeline:
             p_len: Desired length of the F0 output.
             hop_length: Hop length for F0 estimation methods.
         """
-        methods_str = re.search("hybrid\[(.+)\]", methods_str)
+        methods_str = re.search(r"hybrid\[(.+)\]", methods_str)
         if methods_str:
             methods = [method.strip() for method in methods_str.group(1).split("+")]
         f0_computation_stack = []
@@ -264,13 +270,7 @@ class Pipeline:
                 )
             elif method == "rmvpe":
                 self.model_rmvpe = RMVPE0Predictor(
-                    os.path.join(
-                        "programs",
-                        "rvc",
-                        "models",
-                        "predictors",
-                        "rmvpe.pt",
-                    ),
+                    os.path.join(PREDICTORS_DIR, "rmvpe.pt"),
                     is_half=self.is_half,
                     device=self.device,
                 )
@@ -278,13 +278,7 @@ class Pipeline:
                 f0 = f0[1:]
             elif method == "fcpe":
                 self.model_fcpe = FCPEF0Predictor(
-                    os.path.join(
-                        "programs",
-                        "rvc",
-                        "models",
-                        "predictors",
-                        "fcpe.pt",
-                    ),
+                    os.path.join(PREDICTORS_DIR, "fcpe.pt"),
                     f0_min=int(f0_min),
                     f0_max=int(f0_max),
                     dtype=torch.float32,
@@ -332,26 +326,24 @@ class Pipeline:
             inp_f0: Optional input F0 contour to use instead of estimating.
         """
         global input_audio_path2wav
-        if f0_method == "crepe":
+        if f0_method in ("crepe", "mangio-crepe"):
+            # "mangio-crepe" is kept as a legacy alias of "crepe".
             f0 = self.get_f0_crepe(x, self.f0_min, self.f0_max, p_len, int(hop_length))
         elif f0_method == "crepe-tiny":
             f0 = self.get_f0_crepe(
                 x, self.f0_min, self.f0_max, p_len, int(hop_length), "tiny"
             )
-        elif f0_method == "rmvpe":
+        elif f0_method in ("rmvpe", "rmvpe+"):
+            # "rmvpe+" is kept as a legacy alias of "rmvpe".
             self.model_rmvpe = RMVPE0Predictor(
-                os.path.join(
-                    "programs", "rvc", "models", "predictors", "rmvpe.pt"
-                ),
+                os.path.join(PREDICTORS_DIR, "rmvpe.pt"),
                 is_half=self.is_half,
                 device=self.device,
             )
             f0 = self.model_rmvpe.infer_from_audio(x, thred=0.03)
         elif f0_method == "fcpe":
             self.model_fcpe = FCPEF0Predictor(
-                os.path.join(
-                    "programs", "rvc", "models", "predictors", "fcpe.pt"
-                ),
+                os.path.join(PREDICTORS_DIR, "fcpe.pt"),
                 f0_min=int(self.f0_min),
                 f0_max=int(self.f0_max),
                 dtype=torch.float32,
@@ -373,7 +365,7 @@ class Pipeline:
                 hop_length,
             )
 
-        if f0_autotune == "True":
+        if f0_autotune in (True, "True", "true", 1):
             f0 = Autotune.autotune_f0(self, f0)
 
         f0 *= pow(2, pitch / 12)
@@ -693,7 +685,11 @@ class Pipeline:
         if audio_max > 1:
             max_int16 /= audio_max
         audio_opt = (audio_opt * max_int16).astype(np.int16)
-        del pitch, pitchf, sid
+        # pitchf only exists when pitch guidance was used; deleting it
+        # unconditionally would raise UnboundLocalError on F0-less models.
+        if pitch_guidance:
+            del pitch, pitchf
+        del sid
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         return audio_opt

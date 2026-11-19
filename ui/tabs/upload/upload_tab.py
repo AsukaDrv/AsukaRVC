@@ -2,7 +2,7 @@
 
 import gradio as gr
 
-from tabs.common import upload_local_model
+from ui.tabs.common import upload_local_model
 
 
 def upload_tab():

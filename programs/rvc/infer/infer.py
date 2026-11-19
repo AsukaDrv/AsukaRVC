@@ -26,6 +26,47 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("faiss").setLevel(logging.WARNING)
 logging.getLogger("faiss.loader").setLevel(logging.WARNING)
 
+# Process-wide VoiceConverter instance, created lazily on first use and kept
+# alive so conversion caches (HuBERT embedder, generator network) are reused
+# between runs. release_pipeline() unloads it without destroying the object.
+_voice_converter = None
+
+
+def get_voice_converter():
+    """Return the process-wide VoiceConverter, creating it on first use."""
+    global _voice_converter
+    if _voice_converter is None:
+        _voice_converter = VoiceConverter()
+    return _voice_converter
+
+
+def release_pipeline():
+    """Unload the loaded RVC model and free GPU / RAM memory.
+
+    Used before launching a training run, which needs all available memory.
+    Returns the file name of the model that was released, or ``None`` when no
+    model was loaded. The converter instance itself is kept (with its caches
+    reset) so the next conversion simply reloads what it needs.
+    """
+    global _voice_converter
+    converter = _voice_converter
+    if converter is None:
+        return None
+    released = (
+        os.path.basename(converter.current_model_path)
+        if converter.current_model_path
+        else None
+    )
+    converter.hubert_model = None
+    converter.net_g = None
+    converter.vc = None
+    converter.cpt = None
+    converter.tgt_sr = None
+    converter.current_model_path = None
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return released
+
 
 class VoiceConverter:
     """
@@ -48,6 +89,7 @@ class VoiceConverter:
         self.version = None  # Model version
         self.n_spk = None  # Number of speakers in the model
         self.use_f0 = None  # Whether the model uses F0
+        self.current_model_path = None  # Path of the currently loaded model
 
     def load_hubert(self, embedder_model: str, embedder_model_custom: str = None):
         """
@@ -438,6 +480,8 @@ class VoiceConverter:
             if os.path.isfile(weight_root)
             else None
         )
+        if self.cpt is not None:
+            self.current_model_path = weight_root
 
     def setup_network(self):
         """

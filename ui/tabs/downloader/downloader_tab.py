@@ -2,7 +2,7 @@
 
 import gradio as gr
 
-from tabs.common import (
+from ui.tabs.common import (
     download_online_model,
     filter_models,
     load_public_models,

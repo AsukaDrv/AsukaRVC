@@ -11,7 +11,7 @@ exp_dir = str(sys.argv[1])
 index_algorithm = str(sys.argv[2])
 
 try:
-    print("\n[3/3] - Запуск процесса генерации индекса...")
+    print("\n[3/3] - Starting the index generation process...")
     feature_dir = os.path.join(exp_dir, "data", "features")
     model_name = os.path.basename(exp_dir)
 
@@ -24,8 +24,8 @@ try:
         npys = []
         listdir_res = sorted(os.listdir(feature_dir))
 
-        # ncols фиксируем, чтобы при сломанном определении ширины терминала tqdm не игнорировал bar_format
-        for name in tqdm(listdir_res, desc="Загрузка признаков HuBERT", bar_format="{desc}: {n}/{total}", ncols=80):
+        # ncols is pinned so tqdm does not ignore bar_format on broken terminal width detection
+        for name in tqdm(listdir_res, desc="Loading HuBERT features", bar_format="{desc}: {n}/{total}", ncols=80):
             file_path = os.path.join(feature_dir, name)
             phone = np.load(file_path)
             npys.append(phone)
@@ -55,22 +55,22 @@ try:
         index_ivf_added = faiss.extract_index_ivf(index_added)
         index_ivf_added.nprobe = 1
 
-        print("Обучение индекса...")
+        print("Training the index...")
         index_added.train(big_npy)
 
         batch_size_add = 8192
         for i in tqdm(
             range(0, big_npy.shape[0], batch_size_add),
-            desc="Добавление векторов в индекс",
+            desc="Adding vectors to the index",
             bar_format="{desc}: {n}/{total}",
             ncols=80,
         ):
             index_added.add(big_npy[i : i + batch_size_add])
 
         faiss.write_index(index_added, index_filepath)
-        print(f"✓ Индекс успешно сохранен - '{index_filepath}'")
+        print(f"✓ Index saved successfully - '{index_filepath}'")
 
 except Exception as error:
-    print(f"Произошла ошибка при извлечении индекса: {error}")
-    print("Если вы запускаете этот код в виртуальной среде, убедитесь, что у вас достаточно GPU для генерации файла индекса.")
+    print(f"An error occurred while building the index: {error}")
+    print("If you are running this code in a virtual environment, make sure you have enough GPU resources to generate the index file.")
     sys.exit(1)

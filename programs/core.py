@@ -26,7 +26,7 @@ import noisereduce as nr
 from audio_separator.separator import Separator
 
 from programs.rvc.lib.tools.model_download import model_download_pipeline
-from logging_setup import get_logger
+from config.logging_setup import get_logger
 
 logger = get_logger("core")
 
@@ -231,7 +231,13 @@ def yt_download(link):
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         result = ydl.extract_info(link, download=True)
+        if result is None:
+            gr.Info("The link could not be downloaded. Check the URL and try again.")
+            return None
         download_path = ydl.prepare_filename(result, outtmpl='%(title)s.mp3')
+    if not os.path.exists(download_path):
+        gr.Info("The download finished, but the audio file was not found.")
+        return None
     return download_path
 
 
@@ -589,7 +595,7 @@ def separate_stems(song_dir, orig_song_path, vocal_model_name, karaoke_model_nam
     return vocals_path, instrumentals_path, main_vocals_path, backup_vocals_path, main_vocals_dereverb_path
 
 
-PREDICTORS_DIR = os.path.join(now_dir, "programs", "rvc", "models", "predictors")
+PREDICTORS_DIR = os.path.join(BASE_DIR, "programs", "rvc", "models", "predictors")
 PREDICTOR_URLS = {
     "rmvpe": "https://huggingface.co/IAHispano/Applio/resolve/main/Resources/predictors/rmvpe.pt",
     "fcpe": "https://huggingface.co/IAHispano/Applio/resolve/main/Resources/predictors/fcpe.pt",
@@ -633,10 +639,18 @@ def upload_audio_to_hf(cover_path, repo_id, token):
 
 def voice_change(voice_model, vocals_path, output_path, pitch_change, f0_method, index_rate,
                  filter_radius, rms_mix_rate, protect, crepe_hop_length, is_webui,
-                 embedder_model="contentvec", split_audio=False, autotune=False):
-    """Convert the dry vocals with the selected RVC voice model."""
+                 embedder_model="contentvec", split_audio=False, autotune=False,
+                 index_path_override=None):
+    """Convert the dry vocals with the selected RVC voice model.
+
+    ``index_path_override`` replaces the model's auto-detected index file —
+    used by the Backing Vocals RVC feature, which lets the user pick an
+    explicit index path.
+    """
     ensure_f0_predictor(f0_method)
     rvc_model_path, rvc_index_path = get_rvc_model(voice_model, is_webui)
+    if index_path_override:
+        rvc_index_path = index_path_override
     voice_converter = import_voice_converter()
     voice_converter.convert_audio(
         audio_input_path=vocals_path,
@@ -676,9 +690,18 @@ def add_audio_effects(audio_path, reverb_rm_size, reverb_wet, reverb_dry, reverb
     return output_path
 
 
-def combine_audio(audio_paths, output_path, main_gain, backup_gain, inst_gain, output_format):
+def combine_audio(audio_paths, output_path, main_gain, backup_gain, inst_gain, output_format,
+                  backing_vocals_volume=0):
+    """Overlay the AI vocals, the backing track and the instrumental.
+
+    ``backing_vocals_volume`` is an extra offset (dB) applied only when the
+    backing track is the RVC-converted backing vocals (``audio_paths[1]`` ends
+    with ``_backing_``); it compensates for the loudness of the converted
+    track without changing the original backup vocals behaviour.
+    """
     main_vocal_audio = AudioSegment.from_wav(audio_paths[0]) - 4 + main_gain
-    backup_vocal_audio = AudioSegment.from_file(audio_paths[1]) - 6 + backup_gain
+    backing_offset = backing_vocals_volume if '_backing_' in os.path.basename(audio_paths[1]) else 0
+    backup_vocal_audio = AudioSegment.from_file(audio_paths[1]) - 6 + backup_gain + backing_offset
     instrumental_audio = AudioSegment.from_file(audio_paths[2]) - 7 + inst_gain
     main_vocal_audio.overlay(backup_vocal_audio).overlay(instrumental_audio).export(output_path, format=output_format)
 
@@ -719,12 +742,18 @@ def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
                         instruments_only=False, backing_vocals_volume=0,
                         inst_pitch_shift=0, export_format_final="mp3",
                         split_audio=False, autotune=False, embedder_model="contentvec",
+                        infer_backing_vocals=False, infer_backing_vocals_model=None, infer_backing_vocals_index="",
+                        pitch_back=0, filter_radius_back=3, index_rate_back=0.5, rms_mix_rate_back=0.25,
+                        protect_back=0.33, pitch_extract_back='rmvpe', hop_length_back=128,
+                        export_format_rvc_back='wav', split_audio_back=False, autotune_back=False,
+                        embedder_model_back='contentvec',
                         hf_upload=False, hf_repo_id="", hf_token="",
                         batch_size=1, use_tta=False, progress=gr.Progress()):
     """
     AI cover pipeline: music separation (music_separation_code for MSST models,
-    audio-separator for VR/MDX models) -> RVC voice conversion -> audio
-    effects -> final mix.
+    audio-separator for VR/MDX models) -> RVC voice conversion of the main
+    vocals (and optionally of the backup vocals with a second RVC model) ->
+    audio effects -> final mix.
     The `steps` parameter is kept for backward compatibility but is unused by
     RVC v2 models.
     """
@@ -796,6 +825,40 @@ def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
                          index_rate, filter_radius, rms_mix_rate, protect, crepe_hop_length, is_webui,
                          embedder_model, split_audio, autotune)
 
+        # Backing vocals RVC conversion (optional): convert the backup vocals
+        # with a second RVC model and use the result in the final mix.
+        ai_backing_vocals_path = None
+        if infer_backing_vocals:
+            if not infer_backing_vocals_model:
+                raise_exception('Select a backing vocals RVC model or disable the backing vocals conversion.', is_webui)
+            if backup_vocals_path and os.path.exists(backup_vocals_path):
+                display_progress('[~] Converting backing vocals using RVC...', 0.6, is_webui, progress)
+                pitch_change_back = pitch_back * 12 + pitch_change_all
+                ai_backing_vocals_path = os.path.join(
+                    song_dir,
+                    f'{music_folder}_backing_{infer_backing_vocals_model}_p{pitch_change_back}_i{index_rate_back}.wav',
+                )
+                if not os.path.exists(ai_backing_vocals_path):
+                    # Use the manual index path when provided, otherwise the
+                    # index shipped next to the backing model.
+                    backing_index = (infer_backing_vocals_index or '').strip().strip('"') or None
+                    ensure_f0_predictor(pitch_extract_back)
+                    voice_change(
+                        infer_backing_vocals_model, backup_vocals_path, ai_backing_vocals_path,
+                        pitch_change_back, pitch_extract_back, index_rate_back, filter_radius_back,
+                        rms_mix_rate_back, protect_back, hop_length_back, is_webui,
+                        embedder_model_back, split_audio_back, autotune_back,
+                        index_path_override=backing_index,
+                    )
+                # When the backing conversion was exported in a compressed
+                # format, the converted file replaces the raw wav.
+                if export_format_rvc_back != 'wav':
+                    converted_backing = ai_backing_vocals_path.replace('.wav', f'.{export_format_rvc_back}')
+                    if os.path.exists(converted_backing):
+                        ai_backing_vocals_path = converted_backing
+            else:
+                logger.warning('Backing vocals conversion requested, but no backup vocals stem was found; skipping.')
+
         end = time.time()
         logger.info("Execution time: %.4f seconds", end - start)
         with sf.SoundFile(ai_vocals_path) as f:
@@ -815,19 +878,26 @@ def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
             if pitch_change_all != 0:
                 instrumentals_path = pitch_shift(instrumentals_path, pitch_change_all)
                 backup_vocals_path = pitch_shift(backup_vocals_path, pitch_change_all)
+                if ai_backing_vocals_path:
+                    ai_backing_vocals_path = pitch_shift(ai_backing_vocals_path, pitch_change_all)
             if inst_pitch_shift != 0:
                 instrumentals_path = pitch_shift(instrumentals_path, inst_pitch_shift)
 
-        # Combine
+        # Combine: the RVC-converted backing vocals (when enabled) replace the
+        # original backup vocals in the final mix.
         display_progress('[~] Combining AI Vocals and Instrumentals...', 0.9, is_webui, progress)
+        backing_track_path = ai_backing_vocals_path or backup_vocals_path
         combine_audio(
-            [ai_vocals_mixed_path, backup_vocals_path, instrumentals_path],
-            ai_cover_path, main_gain, backup_gain, inst_gain, export_format_final
+            [ai_vocals_mixed_path, backing_track_path, instrumentals_path],
+            ai_cover_path, main_gain, backup_gain, inst_gain, export_format_final,
+            backing_vocals_volume=backing_vocals_volume if ai_backing_vocals_path else 0,
         )
 
         if not keep_files:
             display_progress('[~] Removing intermediate audio files...', 0.95, is_webui, progress)
             intermediate_files = [vocals_path, main_vocals_path, ai_vocals_mixed_path, nr_path]
+            if ai_backing_vocals_path:
+                intermediate_files.append(ai_backing_vocals_path)
             if pitch_change_all != 0:
                 intermediate_files += [instrumentals_path, backup_vocals_path]
             for file in intermediate_files:
@@ -903,6 +973,22 @@ if __name__ == '__main__':
     parser.add_argument('-split', '--split-audio', action='store_true', help='Split audio for RVC.')
     parser.add_argument('-autotune', '--autotune', action='store_true', help='Enable autotune for RVC.')
     parser.add_argument('-emb', '--embedder-model', type=str, default='contentvec', help='Embedder model for RVC.')
+    # Backing vocals RVC options
+    parser.add_argument('-bvinfer', '--infer-backing-vocals', action='store_true', help='Convert the backup vocals with a separate RVC model.')
+    parser.add_argument('-bvmodel', '--backing-model', type=str, default=None, help='Name of the RVC model folder used for the backing vocals.')
+    parser.add_argument('-bvindex', '--backing-index', type=str, default='', help='Optional explicit path to the backing vocals index file.')
+    parser.add_argument('-bvpitch', '--backing-pitch', type=int, default=0, help='Pitch change (octaves) of the backing vocals.')
+    parser.add_argument('-bvpalgo', '--backing-pitch-algo', type=str, default='rmvpe', help='Pitch detection algorithm for the backing vocals (rmvpe, rmvpe+, mangio-crepe).')
+    parser.add_argument('-bvhop', '--backing-hop-length', type=int, default=128, help='Crepe hop length for the backing vocals.')
+    parser.add_argument('-bvir', '--backing-index-rate', type=float, default=0.5, help='Index rate of the backing vocals conversion.')
+    parser.add_argument('-bvfr', '--backing-filter-radius', type=int, default=3, help='Filter radius of the backing vocals conversion.')
+    parser.add_argument('-bvrms', '--backing-rms-mix-rate', type=float, default=0.25, help='RMS mix rate of the backing vocals conversion.')
+    parser.add_argument('-bvpro', '--backing-protect', type=float, default=0.33, help='Protect rate of the backing vocals conversion.')
+    parser.add_argument('-bvvol', '--backing-volume', type=int, default=0, help='Extra volume offset (dB) of the RVC backing vocals in the final mix.')
+    parser.add_argument('-bvoformat', '--backing-output-format', type=str, default='wav', help='Export format of the backing vocals conversion (wav, mp3, flac).')
+    parser.add_argument('-bvsplit', '--backing-split-audio', action='store_true', help='Split audio for the backing vocals conversion.')
+    parser.add_argument('-bvautotune', '--backing-autotune', action='store_true', help='Enable autotune for the backing vocals conversion.')
+    parser.add_argument('-bvemb', '--backing-embedder-model', type=str, default='contentvec', help='Embedder model for the backing vocals conversion.')
     parser.add_argument('-bs', '--batch-size', type=int, default=1, help='Batch size for VR (audio-separator) models.')
     parser.add_argument('-tta', '--use-tta', action='store_true', help='Enable test-time augmentation during separation (slower but cleaner).')
 
@@ -937,6 +1023,21 @@ if __name__ == '__main__':
         split_audio=args.split_audio,
         autotune=args.autotune,
         embedder_model=args.embedder_model,
+        infer_backing_vocals=args.infer_backing_vocals,
+        infer_backing_vocals_model=args.backing_model,
+        infer_backing_vocals_index=args.backing_index,
+        pitch_back=args.backing_pitch,
+        pitch_extract_back=args.backing_pitch_algo,
+        hop_length_back=args.backing_hop_length,
+        index_rate_back=args.backing_index_rate,
+        filter_radius_back=args.backing_filter_radius,
+        rms_mix_rate_back=args.backing_rms_mix_rate,
+        protect_back=args.backing_protect,
+        backing_vocals_volume=args.backing_volume,
+        export_format_rvc_back=args.backing_output_format,
+        split_audio_back=args.backing_split_audio,
+        autotune_back=args.backing_autotune,
+        embedder_model_back=args.backing_embedder_model,
         batch_size=args.batch_size,
         use_tta=args.use_tta,
     )

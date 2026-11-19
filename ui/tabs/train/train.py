@@ -150,7 +150,7 @@ def _slice_dataset(model_name, files, folder, sample_rate, segment_len, normaliz
     yield from run_job(
         f"Dataset slicing “{model_name}”",
         command(
-            "rvc.training.preprocess.preprocess",
+            "programs.rvc.training.preprocess.preprocess",
             _exp_dir(model_name),
             input_root,
             float(segment_len),
@@ -169,7 +169,7 @@ def _extract_features(model_name, sample_rate, f0_method, include_mutes):
     yield from run_job(
         f"Feature extraction “{model_name}”",
         command(
-            "rvc.training.preprocess.preparing_data",
+            "programs.rvc.training.preprocess.preparing_data",
             _exp_dir(model_name),
             f0_method,
             int(sample_rate),
@@ -186,7 +186,7 @@ def _train_index(model_name):
         raise gr.Error("No features — extract them first.")
     yield from run_job(
         f"Index “{model_name}”",
-        command("rvc.training.preprocess.extract_index", _exp_dir(model_name), "Auto"),
+        command("programs.rvc.training.preprocess.extract_index", _exp_dir(model_name), "Auto"),
     )
 
 
@@ -316,7 +316,7 @@ def _train_model(
         raise gr.Error("No filelist.txt — run slicing and feature extraction first.")
     _check_config(model_name, exp_dir, vocoder, int(sample_rate))
     cmd = command(
-        "rvc.training.train",
+        "programs.rvc.training.train",
         "--experiment_dir",
         logs_dir,
         "--model_name",

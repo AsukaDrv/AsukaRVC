@@ -1,7 +1,17 @@
--r pre-requirements.txt 
+-r pre-requirements.txt
 
 # UI
 spaces
 gradio
 fastapi>=0.100.0
 uvicorn>=0.23.0
+
+# Training tab
+tensorboard
+
+# Pipeline utilities not covered by pre-requirements.txt
+PyYAML>=6.0
+pydub>=0.25.1
+wget>=3.2
+beautifulsoup4>=4.12
+six>=1.16

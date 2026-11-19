@@ -13,7 +13,7 @@ def replace_keys_in_dict(d, old_key_part, new_key_part):
 
 
 def save_checkpoint(net_g, optim_g, net_d, optim_d, epoch, checkpoint_path):
-    """Сохранение чекпоинта (G + D + optimizers)."""
+    """Save a training checkpoint (generator + discriminator + optimizers)."""
     g_state = net_g.module.state_dict() if hasattr(net_g, "module") else net_g.state_dict()
     d_state = net_d.module.state_dict() if hasattr(net_d, "module") else net_d.state_dict()
 
@@ -38,11 +38,11 @@ def save_checkpoint(net_g, optim_g, net_d, optim_d, epoch, checkpoint_path):
     )
 
     torch.save(checkpoint_data, checkpoint_path)
-    print(f"▸ Сохранён чекпоинт: '{os.path.basename(checkpoint_path)}'", flush=True)
+    print(f"▸ Checkpoint saved: '{os.path.basename(checkpoint_path)}'", flush=True)
 
 
 def load_checkpoint(checkpoint_path, net_g, optim_g, net_d, optim_d):
-    """Загрузка чекпоинта."""
+    """Load a training checkpoint."""
     try:
         checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     except Exception:
@@ -54,14 +54,14 @@ def load_checkpoint(checkpoint_path, net_g, optim_g, net_d, optim_d):
         ".parametrizations.weight.original0",
     )
 
-    # Загрузка генератора
+    # Load the generator
     g_model = net_g.module if hasattr(net_g, "module") else net_g
     g_state_dict = g_model.state_dict()
     g_new_state = {k: checkpoint["generator"]["model"].get(k, v) for k, v in g_state_dict.items()}
     g_model.load_state_dict(g_new_state, strict=False)
     optim_g.load_state_dict(checkpoint["generator"]["optimizer"])
 
-    # Загрузка дискриминатора
+    # Load the discriminator
     d_model = net_d.module if hasattr(net_d, "module") else net_d
     d_state_dict = d_model.state_dict()
     d_new_state = {k: checkpoint["discriminator"]["model"].get(k, v) for k, v in d_state_dict.items()}
@@ -69,24 +69,24 @@ def load_checkpoint(checkpoint_path, net_g, optim_g, net_d, optim_d):
     optim_d.load_state_dict(checkpoint["discriminator"]["optimizer"])
 
     epoch = checkpoint["epoch"]
-    print(f"Загружен чекпоинт: '{os.path.basename(checkpoint_path)}' (Эпоха {epoch})", flush=True)
+    print(f"Checkpoint loaded: '{os.path.basename(checkpoint_path)}' (epoch {epoch})", flush=True)
     return epoch
 
 
 def extract_model(hps, ckpt, epoch, step, filepath, half=True):
-    """Извлекает и сохраняет модель для инференса.
+    """Extract and save an inference-ready model from a training checkpoint.
 
     Args:
-        hps: Гиперпараметры модели.
-        ckpt: State dict модели (генератора).
-        epoch: Номер эпохи.
-        step: Номер шага.
-        filepath: Полный путь для сохранения файла.
-        half: Если True — сохраняет веса в float16 (меньше размер).
-              Если False — сохраняет веса в float32 (полная точность).
+        hps: Model hyperparameters.
+        ckpt: Model state dict (generator).
+        epoch: Epoch number.
+        step: Global step number.
+        filepath: Full destination file path.
+        half: When True, save weights as float16 (smaller file);
+              when False, save weights as float32 (full precision).
 
     Returns:
-        Сообщение об успехе или ошибке.
+        A success or error message.
 
     """
     try:
@@ -116,7 +116,7 @@ def extract_model(hps, ckpt, epoch, step, filepath, half=True):
             hps.data.sample_rate,
         ]
 
-        # Основные метаданные модели
+        # Main model metadata
         opt["model_name"] = hps.model_name
         opt["epoch"] = epoch
         opt["step"] = step
@@ -125,10 +125,10 @@ def extract_model(hps, ckpt, epoch, step, filepath, half=True):
         opt["version"] = "v2"
         opt["vocoder"] = hps.model.vocoder
 
-        # Дополнительные метаданные
+        # Additional metadata
         opt["learning_environment"] = "MuXVS"
 
-        # Сохранение модели
+        # Save the model
         torch.save(
             replace_keys_in_dict(
                 replace_keys_in_dict(opt, ".parametrizations.weight.original1", ".weight_v"),
@@ -138,9 +138,9 @@ def extract_model(hps, ckpt, epoch, step, filepath, half=True):
             filepath,
         )
 
-        return f"▸ Сохранена модель: '{os.path.basename(filepath)}'"
+        return f"▸ Model saved: '{os.path.basename(filepath)}'"
     except Exception as e:
-        return f"Ошибка при сохранении модели:\n{e}"
+        return f"Error while saving the model:\n{e}"
 
 
 class HParams:
