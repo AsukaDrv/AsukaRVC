@@ -1,14 +1,4 @@
-"""Central logging configuration for AsukaRVC.
 
-Every module that wants to log should do:
-
-    from logging_setup import get_logger
-    logger = get_logger(__name__)
-
-The root handler is configured once by setup_logging(), which app.py
-calls at startup. Library noise (httpx, numba, ...) is silenced by
-configure_logging_libs().
-"""
 
 import logging
 import os
