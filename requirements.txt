@@ -2,6 +2,6 @@
 
 # UI
 spaces
-git+https://huggingface.co/Asukaa02/Gradio
+gradio
 fastapi>=0.100.0
 uvicorn>=0.23.0
