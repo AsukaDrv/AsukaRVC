@@ -4,7 +4,7 @@ from argparse import ArgumentParser
 import spaces
 import gradio as gr
 
-from logging_setup import configure_logging_libs, setup_logging
+from config.logging_setup import configure_logging_libs, setup_logging
 
 configure_logging_libs()
 setup_logging()
@@ -23,7 +23,7 @@ if __name__ == '__main__':
     parser.add_argument("--ssr", action="store_true", help="Enable SSR (Server-Side Rendering)")
     args = parser.parse_args()
 
-    with gr.Blocks(title='AsukaRVC V 3', theme=args.theme, fill_width=True, fill_height=True) as app:
+    with gr.Blocks(title='AsukaRVC V3', theme=args.theme, fill_width=True, fill_height=True) as app:
 
         gr.Label(f'AsukaRVC V3 {"ZeroGPU mode" if IS_ZERO_GPU else ""} created with ❤️', show_label=False)
         if IS_ZERO_GPU:
