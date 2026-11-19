@@ -9,8 +9,8 @@ from config.logging_setup import configure_logging_libs, setup_logging
 configure_logging_libs()
 setup_logging()
 
-from tabs.common import IS_ZERO_GPU
-from tabs.tabs_main import downloader_tab, inference_tab, upload_tab
+from ui.tabs.common import IS_ZERO_GPU
+from ui.tabs.tabs_main import downloader_tab, inference_tab, upload_tab
 
 if __name__ == '__main__':
     parser = ArgumentParser(description='AsukaRVC V3.', add_help=True)
