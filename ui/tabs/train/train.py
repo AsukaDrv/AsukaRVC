@@ -18,8 +18,8 @@ from assets.env_paths import require_training_logs_dir, training_logs_dir
 from assets.model_installer import PRETRAINS_DIR, download_with_progress, ensure_pretrains
 from assets.notebook_check import colab_check, kaggle_check
 from assets.pretrains import NO_PRETRAIN, default_pretrain, pretrain_choices
-from gradio_ui.jobs import command, request_stop, run_job
-from gradio_ui.tensorboard import DEFAULT_TENSORBOARD_PORT, launch_tensorboard
+from ui.utils.jobs import command, request_stop, run_job
+from ui.utils.tensorboard import DEFAULT_TENSORBOARD_PORT, launch_tensorboard
 
 SAMPLE_RATES = [32000, 40000, 48000]
 DEFAULT_VOCODER = "HiFi-GAN"
