@@ -4,7 +4,7 @@ from argparse import ArgumentParser
 import spaces
 import gradio as gr
 
-from config.logging_setup import configure_logging_libs, setup_logging
+from rvc.config.logging_setup import configure_logging_libs, setup_logging
 
 configure_logging_libs()
 setup_logging()
