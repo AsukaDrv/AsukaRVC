@@ -9,7 +9,7 @@ current_dir = os.getcwd()
 sys.path.append(current_dir)
 
 
-from rvc.config.logging_setup import configure_logging_libs, setup_logging
+from config.logging_setup import configure_logging_libs, setup_logging
 
 configure_logging_libs()
 setup_logging()
