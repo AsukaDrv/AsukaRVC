@@ -591,11 +591,15 @@ async function refreshTrainState() {
 async function refreshPretrains() {
   const vocoder = value("train-vocoder");
   const rate = value("train-sample-rate");
+  // The selects are still empty while /options is loading — nothing to do.
+  if (!vocoder || !rate) return;
   try {
     const data = await api(`/train/pretrains?vocoder=${encodeURIComponent(vocoder)}&sample_rate=${encodeURIComponent(rate)}`);
     fillSelect("train-pretrain", data.choices);
     $("train-pretrain").value = data.default;
-  } catch (_) { /* keep the current list */ }
+  } catch (error) {
+    toast(`Failed to load the pretrain list: ${error.message}`, "error");
+  }
 }
 $("train-vocoder").addEventListener("change", refreshPretrains);
 $("train-sample-rate").addEventListener("change", refreshPretrains);
@@ -623,24 +627,38 @@ function trainName() {
   return name;
 }
 
-$("slice-btn").addEventListener("click", () => {
+/* Name + sample rate for every training action. The rate select stays empty
+ * until /options finishes loading, and Number("") is 0 — catch that here so
+ * the job never starts with a broken 0 Hz / empty-pretrain request. */
+function trainNameAndRate() {
   const name = trainName();
-  if (!name) return;
+  if (!name) return null;
+  const rate = Number(value("train-sample-rate"));
+  if (!rate) {
+    toast("UI options are still loading — sample rate is not ready yet. Try again in a few seconds.", "error");
+    return null;
+  }
+  return { name, rate };
+}
+
+$( "slice-btn").addEventListener("click", () => {
+  const common = trainNameAndRate();
+  if (!common) return;
   startJob("/jobs/train-slice", {
-    model_name: name,
+    model_name: common.name,
     dataset_folder: value("dataset-folder"),
-    sample_rate: Number(value("train-sample-rate")),
+    sample_rate: common.rate,
     segment_len: Number(value("segment-len")),
     normalize: checked("train-normalize"),
   });
 });
 
-$("extract-btn").addEventListener("click", () => {
-  const name = trainName();
-  if (!name) return;
+$( "extract-btn").addEventListener("click", () => {
+  const common = trainNameAndRate();
+  if (!common) return;
   startJob("/jobs/train-extract", {
-    model_name: name,
-    sample_rate: Number(value("train-sample-rate")),
+    model_name: common.name,
+    sample_rate: common.rate,
     f0_method: value("train-f0-method"),
     include_mutes: Number(value("include-mutes")),
   });
@@ -653,18 +671,18 @@ $("index-btn").addEventListener("click", () => {
 });
 
 $("train-btn").addEventListener("click", () => {
-  const name = trainName();
-  if (!name) return;
+  const common = trainNameAndRate();
+  if (!common) return;
   startJob("/jobs/train-start", {
-    model_name: name,
-    sample_rate: Number(value("train-sample-rate")),
+    model_name: common.name,
+    sample_rate: common.rate,
     total_epoch: Number(value("total-epoch")),
     save_every_epoch: Number(value("save-every-epoch")),
     batch_size: Number(value("train-batch-size")),
     vocoder: value("train-vocoder"),
     optimizer: value("train-optimizer"),
     gpus: value("train-gpus"),
-    pretrain: value("train-pretrain"),
+    pretrain: value("train-pretrain") || "No pretrain",
     pretrain_g: value("train-pretrain-g"),
     pretrain_d: value("train-pretrain-d"),
     save_to_zip: checked("save-to-zip"),

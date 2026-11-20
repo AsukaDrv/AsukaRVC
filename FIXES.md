@@ -46,6 +46,14 @@ live curl/browser smoke test):
 
 Bugs fixed along the way in this round:
 
+- Training via the web UI could crash with the confusing
+  `Pretrain set '' has no files for 0 Hz` error when a job was submitted
+  before the page finished loading its options (empty selects sent
+  `pretrain=""` / `sample_rate=0`). Fixed on all layers: the frontend train
+  buttons now refuse to submit with an unloaded sample rate, the REST API
+  rejects invalid rates with a readable HTTP 400 and maps an empty pretrain
+  to "No pretrain", and the shared training logic treats an empty pretrain
+  exactly like the explicit "No pretrain" choice.
 - `ui/tabs/upload/upload_tab.py` was missing from the repository while
   `tabs_main.py` still imported it — `ui/app.py` crashed at startup with
   `ModuleNotFoundError`. The tab is restored (zip upload -> `rvc_models`),

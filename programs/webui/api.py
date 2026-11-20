@@ -542,6 +542,7 @@ def _drain_into_log(generator, job) -> None:
 def train_slice(req: TrainSliceRequest):
     train_module = _train_module()
     folder = (req.dataset_folder or "").strip()
+    _validate_train_sample_rate(req.sample_rate)
 
     def _run(job):
         files = None
@@ -567,6 +568,7 @@ def train_slice(req: TrainSliceRequest):
 @router.post("/jobs/train-extract")
 def train_extract(req: TrainExtractRequest):
     train_module = _train_module()
+    _validate_train_sample_rate(req.sample_rate)
 
     def _run(job):
         _drain_into_log(
@@ -587,9 +589,29 @@ def train_index(req: TrainIndexRequest):
     return {"job_id": _start_train_job("train-index", f"Index '{req.model_name}'", _run)}
 
 
+def _validate_train_sample_rate(sample_rate) -> int:
+    """Reject invalid sample rates with a clear message instead of the
+    confusing "Pretrain set '' has no files for 0 Hz" error."""
+    rate = int(sample_rate or 0)
+    if rate not in (32000, 40000, 48000):
+        raise HTTPException(
+            status_code=400,
+            detail="Sample rate must be one of: 32000, 40000, 48000 "
+            f"(got {rate or 'none'}). The page may still be loading — try again in a moment.",
+        )
+    return rate
+
+
 @router.post("/jobs/train-start")
 def train_start(req: TrainStartRequest):
     train_module = _train_module()
+    req.sample_rate = _validate_train_sample_rate(req.sample_rate)
+    if not (req.pretrain or "").strip():
+        # A web client that submits before the dropdowns loaded sends an empty
+        # pretrain — treat it like the Gradio tab's "No pretrain" choice.
+        from assets.pretrains import NO_PRETRAIN
+
+        req.pretrain = NO_PRETRAIN
 
     def _run(job):
         _drain_into_log(

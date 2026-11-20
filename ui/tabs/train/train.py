@@ -275,9 +275,18 @@ def _resolve_pretrains(pretrain, pretrain_g, pretrain_d, vocoder, sample_rate, e
     if os.path.isfile(os.path.join(exp_dir, "checkpoint.pth")):
         yield "• Found checkpoint.pth — training will resume, pretrains not needed."
         return None, None
-    if pretrain == NO_PRETRAIN:
+    if not (pretrain or "").strip() or pretrain == NO_PRETRAIN:
+        # Empty pretrain (e.g. a web client submitting before the options
+        # loaded) behaves exactly like the explicit "No pretrain" choice.
         yield "• No pretrain: more epochs and data will be required."
         return None, None
+    sample_rate = int(sample_rate or 0)
+    if sample_rate not in SAMPLE_RATES:
+        raise gr.Error(
+            f"Sample rate {sample_rate or '(none)'} Hz is not supported — pick one of: "
+            + ", ".join(str(rate) for rate in SAMPLE_RATES)
+            + "."
+        )
     try:
         return (yield from ensure_pretrains(vocoder, pretrain, sample_rate))
     except ValueError as error:
