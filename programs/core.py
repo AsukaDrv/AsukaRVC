@@ -26,7 +26,7 @@ import noisereduce as nr
 from audio_separator.separator import Separator
 
 from programs.rvc.lib.tools.model_download import model_download_pipeline
-from rvc.config.logging_setup import get_logger
+fromconfig.logging_setup import get_logger
 
 logger = get_logger("core")
 
