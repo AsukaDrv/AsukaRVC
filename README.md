@@ -40,6 +40,32 @@ Built with ❤️ for music enthusiasts and creators, it allows you to transform
 pip install -r requirements.txt   # apt packages: aria2, ffmpeg, sox (packages.txt)
 python ui/app.py                  # add --share for a public Gradio link
 ```
+
+#### Two UI modes
+Pick the interface with `--ui` (default: `gradio`):
+
+```bash
+# 1. Classic Gradio Blocks UI
+python ui/app.py --ui gradio
+
+# 2. Custom HTML/CSS/JS UI served by the same Gradio server
+python ui/app.py --ui web --share
+```
+
+The `web` mode keeps the Gradio-managed server (so `--share` still produces a
+public `*.gradio.live` URL that proxies every route) and mounts:
+
+| Route        | Content                                                     |
+| ------------ | ----------------------------------------------------------- |
+| `/webui/`    | Custom frontend (vanilla HTML/CSS/JS, no build step)         |
+| `/api/v1/…`  | REST API (`programs/webui/api.py`): models, inference jobs, model download/upload, training steps, file serving |
+| `/`          | Redirect to the custom UI                                    |
+
+Jobs (cover generation, model downloads, training steps) run in background
+threads and are polled from the browser; a single public URL serves both the
+frontend and the API. The classic Gradio UI remains available on the same
+installation through mode 1.
+
 CLI cover generation is also available:
 ```bash
 python -m programs.core -i <song-url-or-path> -dir <rvc_model_folder> -p 1 --no-keep-files

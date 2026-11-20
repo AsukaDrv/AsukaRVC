@@ -99,15 +99,15 @@ def compute_hop_length(window_length: int):
 
 
 class MultiScaleMelSpectrogramLoss(torch.nn.Module):
-    def __init__(self, sample_rate: int = 24000, n_mels: list[int] = [5, 10, 20, 40, 80, 160, 320, 480], loss_fn=torch.nn.L1Loss()):
+    def __init__(self, sample_rate: int = 24000, n_mels: tuple[int, ...] = (5, 10, 20, 40, 80, 160, 320, 480), loss_fn=torch.nn.L1Loss()):
         super().__init__()
         self.sample_rate = sample_rate
         self.loss_fn = loss_fn
         self.log_base = torch.log(torch.tensor(10.0))
-        self.stft_params: list[tuple] = []
+        # NOTE: never use a mutable list as a default argument (old code did).
         self.hann_window: dict[int, torch.Tensor] = {}
         self.mel_banks: dict[int, torch.Tensor] = {}
-        self.stft_params = [
+        self.stft_params: list[tuple] = [
             (mel, compute_window_length(mel, sample_rate), compute_hop_length(compute_window_length(mel, sample_rate))) for mel in n_mels
         ]
 

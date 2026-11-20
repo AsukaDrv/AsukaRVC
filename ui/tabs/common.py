@@ -138,9 +138,11 @@ def upload_local_model(zip_path, dir_name, progress=gr.Progress()):
         extraction_folder = os.path.join(rvc_models_dir, dir_name)
         if os.path.exists(extraction_folder):
             raise gr.Error(f'Voice model directory {dir_name} already exists! Choose a different name for your voice model.')
-        zip_name = zip_path.name
+        # Gradio >= 4 preprocesses a single-file gr.File into a plain path
+        # string; older versions passed an object exposing `.name`.
+        zip_path = getattr(zip_path, 'name', zip_path)
         progress(0.5, desc='[~] Extracting zip...')
-        extract_zip(extraction_folder, zip_name)
+        extract_zip(extraction_folder, zip_path)
         return f'[+] {dir_name} Model successfully uploaded!'
     except Exception as e:
         raise gr.Error(str(e))

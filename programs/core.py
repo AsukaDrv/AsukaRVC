@@ -1,9 +1,10 @@
-import spaces, sys
+import sys
 import torch
 import argparse
 import gc
 import hashlib
 import os
+import re
 import subprocess
 from contextlib import suppress
 from urllib.parse import urlparse, parse_qs
@@ -207,7 +208,9 @@ def get_youtube_video_id(url, ignore_playlist=True):
         if query.path == '/watch':
             return parse_qs(query.query)['v'][0]
         if query.path[:7] == '/watch/':
-            return query.path.split('/')[1]
+            # "watch/<id>" -> ['', 'watch', '<id>']: the id is the THIRD part,
+            # not the second. The old index returned the literal 'watch'.
+            return query.path.split('/')[2]
         if query.path[:7] == '/embed/':
             return query.path.split('/')[2]
         if query.path[:3] == '/v/':
@@ -352,19 +355,41 @@ def get_model_info_by_name(model_name):
     return None
 
 
+def _normalize_filename(name):
+    """Normalize a file name for stem lookups.
+
+    Lower-case the name and strip every non-alphanumeric character, so the
+    search works across the two different naming conventions in the pipeline:
+    MSST writes lowercase names with underscores ("song_noreverb.flac") while
+    audio-separator writes "(No Reverb)"-style stems with spaces and capitals
+    ("song_(No Echo)_UVR-De-Echo-Normal.flac"). The old case-sensitive
+    substring search never matched those UVR stems, so the converted karaoke /
+    deecho / denoise / dereverb results were silently ignored.
+    """
+    return re.sub(r"[^a-z0-9]", "", os.path.basename(name).lower())
+
+
 def search_with_word(folder, word):
+    """Return the most recent file in ``folder`` whose name contains ``word``."""
     if not os.path.isdir(folder):
         raise NotADirectoryError(f"{folder} is not a valid directory.")
-    files = [f for f in os.listdir(folder) if word in f]
+    word = _normalize_filename(word)
+    files = [f for f in os.listdir(folder) if word in _normalize_filename(f)]
     if not files:
         return None
     return max(files, key=lambda f: os.path.getmtime(os.path.join(folder, f)))
 
 
 def search_with_two_words(folder, word1, word2):
+    """Return the most recent file in ``folder`` whose name contains both words."""
     if not os.path.isdir(folder):
         raise NotADirectoryError(f"{folder} is not a valid directory.")
-    files = [f for f in os.listdir(folder) if word1 in f and word2 in f]
+    word1, word2 = _normalize_filename(word1), _normalize_filename(word2)
+    files = [
+        f
+        for f in os.listdir(folder)
+        if word1 in _normalize_filename(f) and word2 in _normalize_filename(f)
+    ]
     if not files:
         return None
     return max(files, key=lambda f: os.path.getmtime(os.path.join(folder, f)))
@@ -899,7 +924,12 @@ def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
             if ai_backing_vocals_path:
                 intermediate_files.append(ai_backing_vocals_path)
             if pitch_change_all != 0:
+                # Both stems were pitch-shifted: remove the shifted copies.
                 intermediate_files += [instrumentals_path, backup_vocals_path]
+            elif inst_pitch_shift != 0:
+                # Only the instrumental was shifted: the previous condition
+                # left the shifted copy behind on disk.
+                intermediate_files += [instrumentals_path]
             for file in intermediate_files:
                 if file and os.path.exists(file):
                     os.remove(file)

@@ -5,6 +5,8 @@ spaces
 gradio
 fastapi>=0.100.0
 uvicorn>=0.23.0
+# Required by FastAPI multipart parsing (custom WebUI upload endpoints)
+python-multipart>=0.0.9
 
 # Training tab
 tensorboard

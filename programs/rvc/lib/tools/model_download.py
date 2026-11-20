@@ -1,7 +1,5 @@
 import os
 import re
-import six
-import sys
 import wget
 import shutil
 import zipfile
@@ -9,22 +7,72 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import unquote, urlencode, parse_qs, urlparse
 
-now_dir = os.getcwd()
-sys.path.append(now_dir)
-
 from programs.rvc.lib.utils import format_title
 from programs.rvc.lib.tools import gdown
 
+# Repository root, resolved from this file so the paths below are independent
+# of the process working directory. model_download.py lives at
+# programs/rvc/lib/tools/model_download.py, so the project root is five
+# directory levels up (tools -> lib -> rvc -> programs -> root).
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
-def find_folder_parent(search_dir, folder_name):
-    for dirpath, dirnames, _ in os.walk(search_dir):
-        if folder_name in dirnames:
-            return os.path.abspath(dirpath)
-    return None
-
-
-file_path = find_folder_parent(now_dir, "logs")
+# NOTE: The old implementation located the storage root with
+# find_folder_parent(os.getcwd(), "logs"), which walked the whole tree looking
+# for any folder named "logs". On a fresh clone that folder does not exist, so
+# it returned None and os.path.join(None, "zips") crashed this module at import
+# time (taking down programs/core.py and the whole WebUI with it). When a clone
+# DOES contain .git/, the lookup matched .git/logs and returned .git as the
+# storage root, writing downloads into .git/zips. Anchoring to PROJECT_ROOT
+# avoids both failure modes.
+file_path = os.path.join(PROJECT_ROOT, "logs")
 zips_path = os.path.join(file_path, "zips")
+
+# Where downloaded voice models are installed. The WebUI lists models from
+# rvc_models/, so extracted models must land there; the previous target
+# (logs/<name>) collided with the training experiments root and the downloaded
+# models never appeared in the voice models dropdown.
+rvc_models_path = os.path.join(PROJECT_ROOT, "rvc_models")
+
+# All downloads and extractions below use absolute paths. The previous code
+# called os.chdir() back and forth, which mutates the working directory of the
+# ENTIRE process (all Gradio worker threads) and left the process inside
+# zips_path whenever a download branch returned early.
+
+
+def _filename_from_headers(response, url, default_name="download.zip"):
+    """Best-effort file name from a download response.
+
+    Falls back to the URL basename when the server does not send a usable
+    Content-Disposition header (the old code raised KeyError/AttributeError
+    there).
+    """
+    disposition = response.headers.get("Content-Disposition") or ""
+    match = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)"?', disposition)
+    if match:
+        return unquote(match.group(1).strip())
+    url_name = unquote(urlparse(url).path.rstrip("/").rsplit("/", 1)[-1])
+    return url_name or default_name
+
+
+def _write_stream(response, destination_path, label="download"):
+    """Stream a response body to destination_path with a console progress bar."""
+    total_size_in_bytes = int(response.headers.get("content-length", 0))
+    block_size = 1024
+    progress_bar_length = 50
+    progress = 0
+    with open(destination_path, "wb") as file:
+        for data in response.iter_content(block_size):
+            file.write(data)
+            progress += len(data)
+            if total_size_in_bytes:
+                progress_percent = int((progress / total_size_in_bytes) * 100)
+                num_dots = int((progress / total_size_in_bytes) * progress_bar_length)
+                progress_bar = "[" + "." * num_dots + " " * (progress_bar_length - num_dots) + "]"
+                print(f"{progress_percent}% {progress_bar} {progress}/{total_size_in_bytes}  ", end="\r")
+                if progress_percent >= 100:
+                    print("\n")
+    if not total_size_in_bytes:
+        print(f"{label} finished: {os.path.basename(destination_path)}")
 
 
 def search_pth_index(folder):
@@ -57,6 +105,12 @@ def get_mediafire_download_link(url):
 
 
 def download_from_url(url):
+    """Download a model archive into ``zips_path`` from the supported hosts.
+
+    Returns "downloaded" on success, a host-specific status string, or None.
+    Everything below uses absolute paths — never os.chdir(), which would
+    mutate the working directory of the whole process (all threads).
+    """
     os.makedirs(zips_path, exist_ok=True)
     if url != "":
         if "drive.google.com" in url:
@@ -68,31 +122,28 @@ def download_from_url(url):
                 return None
 
             if file_id:
-                os.chdir(zips_path)
                 try:
+                    # Download straight into zips_path via the output= option
+                    # instead of relying on the process working directory.
                     gdown.download(
                         f"https://drive.google.com/uc?id={file_id}",
+                        output=zips_path,
                         quiet=True,
                         fuzzy=True,
                     )
                 except Exception as error:
-                    error_message = str(
-                        f"An error occurred downloading the file: {error}"
-                    )
+                    error_message = str(error)
                     if (
                         "Too many users have viewed or downloaded this file recently"
                         in error_message
                     ):
-                        os.chdir(now_dir)
                         return "too much use"
                     elif (
                         "Cannot retrieve the public link of the file." in error_message
                     ):
-                        os.chdir(now_dir)
                         return "private link"
                     else:
-                        print(error_message)
-                        os.chdir(now_dir)
+                        print(f"An error occurred downloading the file: {error}")
                         return None
         elif "disk.yandex.ru" in url:
             base_url = "https://cloud-api.yandex.net/v1/disk/public/resources/download?"
@@ -107,91 +158,55 @@ def download_from_url(url):
                     "filename", [""]
                 )[0]
                 if filename:
-                    os.chdir(zips_path)
-                    with open(filename, "wb") as f:
+                    with open(os.path.join(zips_path, filename), "wb") as f:
                         f.write(download_response.content)
+                else:
+                    print("Failed to get filename from URL.")
+                    return None
             else:
                 print("Failed to get filename from URL.")
                 return None
 
         elif "pixeldrain.com" in url:
             try:
-                file_id = url.split("pixeldrain.com/u/")[1]
-                os.chdir(zips_path)
+                file_id = url.rstrip("/").split("pixeldrain.com/u/")[1]
                 print(file_id)
                 response = requests.get(f"https://pixeldrain.com/api/file/{file_id}")
                 if response.status_code == 200:
-                    file_name = (
-                        response.headers.get("Content-Disposition")
-                        .split("filename=")[-1]
-                        .strip('";')
-                    )
-                    os.makedirs(zips_path, exist_ok=True)
+                    file_name = _filename_from_headers(response, url)
                     with open(os.path.join(zips_path, file_name), "wb") as newfile:
                         newfile.write(response.content)
-                        os.chdir(file_path)
-                        return "downloaded"
+                    return "downloaded"
                 else:
-                    os.chdir(file_path)
                     return None
             except Exception as error:
                 print(f"An error occurred downloading the file: {error}")
-                os.chdir(file_path)
                 return None
 
         elif "cdn.discordapp.com" in url:
             file = requests.get(url)
-            os.chdir(zips_path)
             if file.status_code == 200:
-                name = url.split("/")
-                with open(os.path.join(name[-1]), "wb") as newfile:
+                # The previous code wrote to a relative path after os.chdir()
+                # and leaked the changed working directory on non-200 replies.
+                file_name = unquote(url.rstrip("/").rsplit("/", 1)[-1])
+                with open(os.path.join(zips_path, file_name), "wb") as newfile:
                     newfile.write(file.content)
             else:
                 return None
         elif "/blob/" in url or "/resolve/" in url:
-            os.chdir(zips_path)
             if "/blob/" in url:
                 url = url.replace("/blob/", "/resolve/")
 
             response = requests.get(url, stream=True)
             if response.status_code == 200:
-                content_disposition = six.moves.urllib_parse.unquote(
-                    response.headers["Content-Disposition"]
-                )
-                m = re.search(r'filename="([^"]+)"', content_disposition)
-                file_name = m.groups()[0]
+                # The header may be missing (or lack a filename= entry) on some
+                # hosts; fall back to the URL basename instead of crashing.
+                file_name = _filename_from_headers(response, url)
                 file_name = file_name.replace(os.path.sep, "_")
-                total_size_in_bytes = int(response.headers.get("content-length", 0))
-                block_size = 1024
-                progress_bar_length = 50
-                progress = 0
-
-                with open(os.path.join(zips_path, file_name), "wb") as file:
-                    for data in response.iter_content(block_size):
-                        file.write(data)
-                        progress += len(data)
-                        progress_percent = int((progress / total_size_in_bytes) * 100)
-                        num_dots = int(
-                            (progress / total_size_in_bytes) * progress_bar_length
-                        )
-                        progress_bar = (
-                            "["
-                            + "." * num_dots
-                            + " " * (progress_bar_length - num_dots)
-                            + "]"
-                        )
-                        print(
-                            f"{progress_percent}% {progress_bar} {progress}/{total_size_in_bytes}  ",
-                            end="\r",
-                        )
-                        if progress_percent == 100:
-                            print("\n")
-
+                _write_stream(response, os.path.join(zips_path, file_name))
             else:
-                os.chdir(now_dir)
                 return None
         elif "/tree/main" in url:
-            os.chdir(zips_path)
             response = requests.get(url)
             soup = BeautifulSoup(response.content, "html.parser")
             temp_url = ""
@@ -200,14 +215,15 @@ def download_from_url(url):
                     temp_url = link["href"]
                     break
             if temp_url:
-                url = temp_url
-                url = url.replace("blob", "resolve")
+                # Normalize the found link to a direct-download URL and ALWAYS
+                # download it: the old code placed wget.download() inside the
+                # "not huggingface.co" branch, so plain HF /tree/ links were
+                # resolved but never actually fetched.
+                url = temp_url.replace("blob", "resolve")
                 if "huggingface.co" not in url:
                     url = "https://huggingface.co" + url
-
-                    wget.download(url)
+                wget.download(url, out=zips_path)
             else:
-                os.chdir(now_dir)
                 return None
         elif "applio.org" in url:
             parts = url.split("/")
@@ -236,26 +252,26 @@ def download_from_url(url):
                 return None
         else:
             try:
-                os.chdir(zips_path)
-                wget.download(url)
+                wget.download(url, out=zips_path)
             except Exception as error:
-                os.chdir(now_dir)
                 print(f"An error occurred downloading the file: {error}")
                 return None
 
+        # Normalize file names in the staging folder: only files directly in
+        # zips_path, with absolute source and destination paths (the old code
+        # built a relative destination that silently depended on os.chdir()).
         for currentPath, _, zipFiles in os.walk(zips_path):
-            for Files in zipFiles:
-                filePart = Files.split(".")
-                extensionFile = filePart[len(filePart) - 1]
-                filePart.pop()
-                nameFile = "_".join(filePart)
-                realPath = os.path.join(currentPath, Files)
-                os.rename(realPath, nameFile + "." + extensionFile)
+            for file in zipFiles:
+                filePart = file.split(".")
+                extensionFile = filePart[-1]
+                nameFile = "_".join(filePart[:-1])
+                realPath = os.path.join(currentPath, file)
+                targetPath = os.path.join(currentPath, nameFile + "." + extensionFile)
+                if realPath != targetPath and not os.path.exists(targetPath):
+                    os.rename(realPath, targetPath)
 
-        os.chdir(now_dir)
         return "downloaded"
 
-    os.chdir(now_dir)
     return None
 
 
@@ -280,6 +296,13 @@ def unzip_file(zip_path, zip_file_name):
 
 
 def model_download_pipeline(url: str):
+    """Download a voice model from ``url`` and install it into rvc_models/.
+
+    The WebUI lists voice models from ``rvc_models/<name>`` (see
+    ui/tabs/common.py), so this pipeline installs there. The previous
+    implementation extracted into ``logs/<name>`` — the training experiments
+    root — where the model was invisible to the Inference tab.
+    """
     try:
         verify = download_from_url(url)
         if verify == "downloaded":
@@ -292,9 +315,10 @@ def model_download_pipeline(url: str):
                     model_zip = os.path.basename(zipfile_path)
                     model_name = format_title(model_zip.split(".zip")[0])
                     extract_folder_path = os.path.join(
-                        "logs",
+                        rvc_models_path,
                         os.path.normpath(model_name),
                     )
+                    os.makedirs(extract_folder_path, exist_ok=True)
                     success = extract_and_show_progress(
                         zipfile_path, extract_folder_path
                     )

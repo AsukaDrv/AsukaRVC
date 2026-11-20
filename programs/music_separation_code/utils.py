@@ -96,8 +96,10 @@ def demix_track(config, model, mix, device, pbar=False):
     # windowingArray crossfades at segment boundaries to mitigate clicking artifacts
     windowingArray = _getWindowingArray(C, fade_size)
 
-    with torch.cuda.amp.autocast(enabled=config.training.use_amp):
-        use_amp = getattr(config.training, 'use_amp', False)  
+    # AMP only makes sense (and is only allowed by torch.autocast) when CUDA is
+    # available: requesting autocast("cuda") on a CPU-only machine raises.
+    use_amp = bool(getattr(config.training, "use_amp", False)) and torch.cuda.is_available()
+    with torch.amp.autocast("cuda", enabled=use_amp):
         with torch.inference_mode():
             if config.training.target_instrument is not None:
                 req_shape = (1, ) + tuple(mix.shape)
@@ -128,7 +130,11 @@ def demix_track(config, model, mix, device, pbar=False):
                     arr = torch.stack(batch_data, dim=0)
                     x = model(arr)
 
-                    window = windowingArray
+                    # Copy the windowing array: the fade-in / fade-out tweaks
+                    # below must not persist into the next batch or the next
+                    # TTA pass (the old code mutated the shared array in place,
+                    # corrupting the crossfades of all later chunks).
+                    window = windowingArray.copy()
                     if i - step == 0:  # First audio chunk, no fadein
                         window[:fade_size] = 1
                     elif i >= mix.shape[1]:  # Last audio chunk, no fadeout
@@ -170,7 +176,10 @@ def demix_track_demucs(config, model, mix, device, pbar=False):
     step = C // N
     # print(S, C, N, step, mix.shape, mix.device)
 
-    with torch.cuda.amp.autocast(enabled=config.training.use_amp):
+    # AMP only makes sense (and is only allowed by torch.autocast) when CUDA is
+    # available: requesting autocast("cuda") on a CPU-only machine raises.
+    use_amp = bool(getattr(config.training, "use_amp", False)) and torch.cuda.is_available()
+    with torch.amp.autocast("cuda", enabled=use_amp):
         with torch.inference_mode():
             req_shape = (S, ) + tuple(mix.shape)
             result = torch.zeros(req_shape, dtype=torch.float32)

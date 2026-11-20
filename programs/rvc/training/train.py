@@ -433,6 +433,10 @@ def train_and_evaluate(hps, rank, epoch, nets, optims, train_loader, writer_eval
     if rank == 0 and epoch % hps.train.log_interval == 0:
         avg = acc.average()
 
+        # An epoch can have zero batches (empty dataset): skip the metrics
+        # block instead of crashing on "None is not iterable".
+        if last_batch is None:
+            return
         spec, ids_slice, y_hat, pitchf = last_batch
         mel = spec_to_mel_torch(
             spec,

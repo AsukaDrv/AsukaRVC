@@ -7,8 +7,7 @@ import logging
 import traceback
 import numpy as np
 import soundfile as sf
-
-from scipy.io import wavfile
+from pydub import AudioSegment
 
 now_dir = os.getcwd()
 sys.path.append(now_dir)
@@ -16,7 +15,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 
 from programs.rvc.infer.pipeline import Pipeline as VC
-from programs.rvc.lib.utils import load_audio_infer, load_embedding
+from programs.rvc.lib.utils import load_audio_infer, load_embedding, format_title
 from programs.rvc.lib.tools.split_audio import process_audio, merge_audio
 from programs.rvc.lib.algorithm.synthesizers import Synthesizer
 from programs.rvc.configs.config import Config
@@ -107,31 +106,56 @@ class VoiceConverter:
     @staticmethod
     def convert_audio_format(input_path, output_path, output_format):
         """
-        Converts an audio file to a specified output format.
+        Converts the converted WAV file to the requested export format.
+
+        Fix: the old code compared ``output_format != "WAV"`` while callers
+        pass lowercase formats ("wav"), so EVERY conversion was needlessly
+        resampled to the nearest "common" sample rate (e.g. 40 kHz models got
+        resampled to 44.1 kHz). The comparison is now case-insensitive and a
+        same-format request is a no-op.
+
+        MP3 is exported through pydub/ffmpeg: soundfile cannot write MP3, so
+        the old code silently failed (the converted file simply never appeared).
         """
         try:
-            if output_format != "WAV":
-                print(f"Converting audio to {output_format} format...")
-                audio, sample_rate = librosa.load(input_path, sr=None)
-                common_sample_rates = [
-                    8000,
-                    11025,
-                    12000,
-                    16000,
-                    22050,
-                    24000,
-                    32000,
-                    44100,
-                    48000,
+            output_format = (output_format or "").strip().lower()
+            input_format = os.path.splitext(input_path)[1].lstrip(".").lower()
+            if not output_format or output_format == input_format:
+                # Nothing to do: keep the already written file.
+                return output_path
+
+            print(f"Converting audio to {output_format} format...")
+            if output_format == "mp3":
+                # MP3 only supports a fixed set of sample rates; snap to the
+                # nearest supported one before the ffmpeg export.
+                mp3_sample_rates = [
+                    8000, 11025, 12000, 16000, 22050, 24000,
+                    32000, 44100, 48000,
                 ]
-                target_sr = min(common_sample_rates, key=lambda x: abs(x - sample_rate))
-                audio = librosa.resample(
-                    audio, orig_sr=sample_rate, target_sr=target_sr
-                )
-                sf.write(output_path, audio, target_sr, format=output_format.lower())
+                audio, sample_rate = librosa.load(input_path, sr=None)
+                target_sr = min(mp3_sample_rates, key=lambda x: abs(x - sample_rate))
+                if target_sr != sample_rate:
+                    audio = librosa.resample(audio, orig_sr=sample_rate, target_sr=target_sr)
+                    sample_rate = target_sr
+                pcm = np.clip(audio, -1.0, 1.0)
+                AudioSegment(
+                    (pcm * 32767).astype(np.int16).tobytes(),
+                    frame_rate=sample_rate,
+                    sample_width=2,
+                    channels=1,
+                ).export(output_path, format="mp3")
+            else:
+                # Formats natively supported by soundfile (flac, ogg, ...)
+                # keep their original sample rate: FLAC allows any rate, so no
+                # pointless resample is needed.
+                audio, sample_rate = librosa.load(input_path, sr=None)
+                sf.write(output_path, audio, sample_rate, format=output_format.upper())
             return output_path
         except Exception as error:
             print(f"An error occurred converting the audio format: {error}")
+            # Return the unchanged input path instead of None: the caller
+            # prints/reuses this value as the conversion result.
+            return input_path
 
     def convert_audio(
         self,
@@ -196,6 +220,10 @@ class VoiceConverter:
                 dir_path = (
                     new_dir_path.strip().strip('"').strip("\n").strip('"').strip()
                 )
+                # Initialize paths before the conditional: the old code left
+                # ``paths`` undefined when dir_path was empty, raising NameError
+                # on the loop below.
+                paths = []
                 if dir_path:
                     paths = [
                         os.path.join(root, name)
@@ -231,9 +259,14 @@ class VoiceConverter:
                     print(traceback.format_exc())
                     return f"Error {error}"
                 print("Finished processing segmented audio, now merging audio...")
+                # process_audio() names the timestamps file with format_title(),
+                # which replaces spaces/special characters. The reconstruction
+                # below must apply the same normalization, otherwise the file
+                # cannot be found for any input name containing such characters
+                # (very common: song titles and voice model names).
                 merge_timestamps_file = os.path.join(
                     os.path.dirname(new_dir_path),
-                    f"{os.path.basename(audio_input_path).split('.')[0]}_timestamps.txt",
+                    f"{format_title(os.path.basename(audio_input_path).split('.')[0])}_timestamps.txt",
                 )
                 self.tgt_sr, audio_opt = merge_audio(merge_timestamps_file)
                 os.remove(merge_timestamps_file)
@@ -278,6 +311,10 @@ class VoiceConverter:
         except Exception as error:
             print(f"An error occurred during audio conversion: {error}")
             print(traceback.format_exc())
+            # Re-raise instead of silently returning None: the caller (core.py
+            # song_cover_pipeline) previously crashed later with a misleading
+            # "failed to open file" error while the real failure stayed hidden.
+            raise
 
     def convert_audio_batch(
         self,
@@ -305,9 +342,10 @@ class VoiceConverter:
         """
         Performs voice conversion on a batch of input audio files.
         """
-        pid = os.getpid()
-        with open(pid_file_path, "w") as pid_file:
-            pid_file.write(str(pid))
+        if pid_file_path:
+            pid = os.getpid()
+            with open(pid_file_path, "w") as pid_file:
+                pid_file.write(str(pid))
         try:
             if not self.hubert_model or embedder_model != self.last_embedder_model:
                 self.load_hubert(embedder_model, embedder_model_custom)
@@ -359,6 +397,9 @@ class VoiceConverter:
                     dir_path = (
                         new_dir_path.strip().strip('"').strip("\n").strip('"').strip()
                     )
+                    # Same fix as in convert_audio: never leave ``paths``
+                    # undefined when the chunk folder path is empty.
+                    paths = []
                     if dir_path:
                         paths = [
                             os.path.join(root, name)
@@ -396,9 +437,11 @@ class VoiceConverter:
                         print(traceback.format_exc())
                         return f"Error {error}"
                     print("Finished processing segmented audio, now merging audio...")
+                    # Match the format_title() naming used by process_audio()
+                    # (see the note in convert_audio).
                     merge_timestamps_file = os.path.join(
                         os.path.dirname(new_dir_path),
-                        f"{os.path.basename(audio_input_path).split('.')[0]}_timestamps.txt",
+                        f"{format_title(os.path.basename(audio_input_path).split('.')[0])}_timestamps.txt",
                     )
                     self.tgt_sr, audio_opt = merge_audio(merge_timestamps_file)
                     os.remove(merge_timestamps_file)
@@ -436,7 +479,8 @@ class VoiceConverter:
                 print(f"Conversion completed at '{audio_output_paths}'.")
             elapsed_time = time.time() - start_time
             print(f"Batch conversion completed in {elapsed_time:.2f} seconds.")
-            os.remove(pid_file_path)
+            if pid_file_path and os.path.isfile(pid_file_path):
+                os.remove(pid_file_path)
         except Exception as error:
             print(f"An error occurred during audio conversion: {error}")
             print(traceback.format_exc())
@@ -475,8 +519,12 @@ class VoiceConverter:
         """
         Loads the model weights from the specified path.
         """
+        # weights_only=False is explicit: PyTorch 2.6+ defaults to
+        # weights_only=True, which fails on many RVC checkpoints that store
+        # non-tensor pickle objects. These .pth files are local files the user
+        # deliberately selected, matching the pre-2.6 behaviour.
         self.cpt = (
-            torch.load(weight_root, map_location="cpu")
+            torch.load(weight_root, map_location="cpu", weights_only=False)
             if os.path.isfile(weight_root)
             else None
         )

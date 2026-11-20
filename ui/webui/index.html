@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AsukaRVC — WebUI</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%237c5cff'/%3E%3Cpath d='M10 22V10l12 6-12 6z' fill='white'/%3E%3C/svg%3E" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-logo">A</div>
+      <div>
+        <h1>AsukaRVC <span class="brand-version" id="brand-version"></span></h1>
+        <p class="brand-sub">AI cover generation — custom WebUI</p>
+      </div>
+    </div>
+    <div class="topbar-badges" id="topbar-badges"></div>
+  </header>
+
+  <div class="job-banner" id="job-banner" hidden>
+    <span class="spinner" aria-hidden="true"></span>
+    <div class="job-info">
+      <strong id="job-title">Running…</strong>
+      <span id="job-status">starting</span>
+    </div>
+    <button class="btn btn-ghost btn-sm" id="job-log-toggle">Log</button>
+    <button class="btn btn-danger btn-sm" id="job-stop">Stop</button>
+  </div>
+
+  <div class="log-drawer" id="log-drawer" hidden>
+    <div class="log-drawer-head">
+      <span>Task log</span>
+      <button class="btn btn-ghost btn-sm" id="log-close">Close</button>
+    </div>
+    <pre id="log-output"></pre>
+  </div>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="inference" role="tab">Inference</button>
+    <button class="tab" data-tab="models" role="tab">Models</button>
+    <button class="tab" data-tab="train" role="tab">Train</button>
+  </nav>
+
+  <main class="container">
+
+    <!-- ============================== INFERENCE ============================== -->
+    <section class="panel" id="tab-inference">
+
+      <div class="card">
+        <div class="card-head"><h2>1 · Source audio</h2></div>
+        <div class="segmented" id="source-mode">
+          <button class="seg-btn active" data-mode="file">File</button>
+          <button class="seg-btn" data-mode="url">URL</button>
+        </div>
+
+        <div id="source-file-block">
+          <div class="dropzone" id="dropzone" tabindex="0">
+            <input type="file" id="audio-file-input" accept=".mp3,.m4a,.flac,.wav,.aac,.ogg,.wma,.alac,.aiff,.opus,.amr" hidden />
+            <p class="dropzone-title">Drop an audio file here or click to browse</p>
+            <p class="dropzone-hint">mp3 · m4a · flac · wav · aac · ogg · opus …</p>
+            <p class="dropzone-file" id="dropzone-file" hidden></p>
+          </div>
+        </div>
+
+        <div id="source-url-block" hidden>
+          <label class="field">
+            <span>Song URL (YouTube or direct link)</span>
+            <input type="text" id="song-url" placeholder="https://www.youtube.com/watch?v=…" />
+          </label>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>2 · Voice model</h2>
+          <button class="btn btn-ghost btn-sm" id="refresh-models">Refresh</button>
+        </div>
+        <label class="field">
+          <span>Voice model</span>
+          <select id="voice-model"></select>
+        </label>
+        <p class="hint" id="models-hint">No models installed yet — grab one in the Models tab.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>3 · Settings</h2></div>
+
+        <div class="grid-2">
+          <label class="slider-field">
+            <span>Pitch change <em>(vocals only, octaves)</em> — <b id="pitch-change-val">0</b></span>
+            <input type="range" id="pitch-change" min="-3" max="3" step="1" value="0" />
+          </label>
+          <label class="slider-field">
+            <span>Overall pitch change <em>(semitones)</em> — <b id="pitch-change-all-val">0</b></span>
+            <input type="range" id="pitch-change-all" min="-12" max="12" step="1" value="0" />
+          </label>
+        </div>
+
+        <details class="accordion">
+          <summary>Separation models</summary>
+          <div class="grid-2">
+            <label class="field"><span>Vocal separation model</span><select id="vocal-model-name"></select></label>
+            <label class="field"><span>Karaoke model</span><select id="karaoke-model-name"></select></label>
+            <label class="field"><span>Dereverb model</span><select id="dereverb-model-name"></select></label>
+            <label class="field"><span>Denoise model</span><select id="denoise-model-name"></select></label>
+            <label class="field"><span>Deecho model</span><select id="deecho-model-name"></select></label>
+          </div>
+          <div class="check-grid">
+            <label class="check"><input type="checkbox" id="use-dereverb" checked /> Enable dereverb</label>
+            <label class="check"><input type="checkbox" id="use-denoise" /> Enable denoise</label>
+            <label class="check"><input type="checkbox" id="use-deecho" /> Enable deecho</label>
+            <label class="check"><input type="checkbox" id="instruments-only" /> Instruments only (skip voice conversion)</label>
+          </div>
+          <p class="warn" id="separation-warn" hidden>
+            Separation model lists are unavailable — the ML backend is not loaded on this server.
+          </p>
+        </details>
+
+        <details class="accordion">
+          <summary>Voice conversion options</summary>
+          <div class="grid-4">
+            <label class="slider-field"><span>Index rate — <b id="index-rate-val">0.5</b></span>
+              <input type="range" id="index-rate" min="0" max="1" step="0.05" value="0.5" /></label>
+            <label class="slider-field"><span>Filter radius — <b id="filter-radius-val">3</b></span>
+              <input type="range" id="filter-radius" min="0" max="7" step="1" value="3" /></label>
+            <label class="slider-field"><span>RMS mix rate — <b id="rms-mix-rate-val">0.25</b></span>
+              <input type="range" id="rms-mix-rate" min="0" max="1" step="0.05" value="0.25" /></label>
+            <label class="slider-field"><span>Protect rate — <b id="protect-val">0.33</b></span>
+              <input type="range" id="protect" min="0" max="0.5" step="0.01" value="0.33" /></label>
+          </div>
+          <div class="grid-2">
+            <label class="field">
+              <span>Pitch detection algorithm</span>
+              <select id="f0-method"><option value="rmvpe">rmvpe</option><option value="fcpe">fcpe</option><option value="crepe">crepe</option></select>
+            </label>
+            <label class="field"><span>Embedder model</span><select id="embedder-model"></select></label>
+          </div>
+          <div id="crepe-hop-block" hidden>
+            <label class="slider-field"><span>Crepe hop length — <b id="crepe-hop-length-val">128</b></span>
+              <input type="range" id="crepe-hop-length" min="32" max="320" step="1" value="128" /></label>
+          </div>
+          <div class="check-grid">
+            <label class="check"><input type="checkbox" id="extra-denoise" checked /> Denoise output</label>
+            <label class="check"><input type="checkbox" id="split-audio" /> Split audio</label>
+            <label class="check"><input type="checkbox" id="autotune" /> Autotune</label>
+            <label class="check"><input type="checkbox" id="keep-files" checked /> Keep intermediate files</label>
+          </div>
+        </details>
+
+        <details class="accordion">
+          <summary>Backing vocals RVC (optional)</summary>
+          <label class="check"><input type="checkbox" id="infer-backing-vocals" /> Convert backing vocals with a separate RVC model</label>
+          <div id="backing-block" hidden>
+            <div class="grid-2">
+              <label class="field"><span>Backing vocals RVC model</span><select id="backing-model"></select></label>
+              <label class="field"><span>Backing vocals index path <em>(optional)</em></span>
+                <input type="text" id="backing-index" placeholder="auto — index shipped next to the model" /></label>
+            </div>
+            <div class="grid-4">
+              <label class="slider-field"><span>Pitch (octaves) — <b id="pitch-back-val">0</b></span>
+                <input type="range" id="pitch-back" min="-3" max="3" step="1" value="0" /></label>
+              <label class="slider-field"><span>Filter radius — <b id="filter-radius-back-val">3</b></span>
+                <input type="range" id="filter-radius-back" min="0" max="7" step="1" value="3" /></label>
+              <label class="slider-field"><span>Index rate — <b id="index-rate-back-val">0.5</b></span>
+                <input type="range" id="index-rate-back" min="0" max="1" step="0.05" value="0.5" /></label>
+              <label class="slider-field"><span>RMS mix rate — <b id="rms-mix-rate-back-val">0.25</b></span>
+                <input type="range" id="rms-mix-rate-back" min="0" max="1" step="0.05" value="0.25" /></label>
+            </div>
+            <div class="grid-4">
+              <label class="slider-field"><span>Protect rate — <b id="protect-back-val">0.33</b></span>
+                <input type="range" id="protect-back" min="0" max="0.5" step="0.01" value="0.33" /></label>
+              <label class="field"><span>Pitch detection</span>
+                <select id="pitch-extract-back">
+                  <option value="rmvpe+">rmvpe+</option><option value="rmvpe">rmvpe</option><option value="mangio-crepe">mangio-crepe</option>
+                </select></label>
+              <label class="slider-field"><span>Hop length — <b id="hop-length-back-val">128</b></span>
+                <input type="range" id="hop-length-back" min="32" max="320" step="1" value="128" /></label>
+              <label class="field"><span>RVC export format</span>
+                <select id="export-format-rvc-back"><option value="wav">wav</option><option value="flac">flac</option><option value="mp3">mp3</option></select></label>
+            </div>
+            <label class="field"><span>Embedder</span><select id="embedder-model-back"></select></label>
+            <div class="check-grid">
+              <label class="check"><input type="checkbox" id="split-audio-back" /> Split audio</label>
+              <label class="check"><input type="checkbox" id="autotune-back" /> Autotune</label>
+            </div>
+          </div>
+        </details>
+
+        <details class="accordion">
+          <summary>Audio mixing options</summary>
+          <div class="grid-4">
+            <label class="slider-field"><span>Main vocals gain (dB) — <b id="main-gain-val">0</b></span>
+              <input type="range" id="main-gain" min="-20" max="20" step="1" value="0" /></label>
+            <label class="slider-field"><span>Backup vocals gain (dB) — <b id="backup-gain-val">0</b></span>
+              <input type="range" id="backup-gain" min="-20" max="20" step="1" value="0" /></label>
+            <label class="slider-field"><span>Music gain (dB) — <b id="inst-gain-val">0</b></span>
+              <input type="range" id="inst-gain" min="-20" max="20" step="1" value="0" /></label>
+            <label class="slider-field"><span>Backing RVC volume (dB) — <b id="backing-vocals-volume-val">0</b></span>
+              <input type="range" id="backing-vocals-volume" min="-20" max="20" step="1" value="0" /></label>
+          </div>
+          <h3>Reverb on AI vocals</h3>
+          <div class="grid-4">
+            <label class="slider-field"><span>Room size — <b id="reverb-rm-size-val">0.15</b></span>
+              <input type="range" id="reverb-rm-size" min="0" max="1" step="0.01" value="0.15" /></label>
+            <label class="slider-field"><span>Wetness — <b id="reverb-wet-val">0.2</b></span>
+              <input type="range" id="reverb-wet" min="0" max="1" step="0.01" value="0.2" /></label>
+            <label class="slider-field"><span>Dryness — <b id="reverb-dry-val">0.8</b></span>
+              <input type="range" id="reverb-dry" min="0" max="1" step="0.01" value="0.8" /></label>
+            <label class="slider-field"><span>Damping — <b id="reverb-damping-val">0.7</b></span>
+              <input type="range" id="reverb-damping" min="0" max="1" step="0.01" value="0.7" /></label>
+            <label class="slider-field"><span>Width — <b id="reverb-width-val">1.0</b></span>
+              <input type="range" id="reverb-width" min="0" max="1" step="0.01" value="1" /></label>
+            <label class="slider-field"><span>Instrumental pitch shift — <b id="inst-pitch-shift-val">0</b></span>
+              <input type="range" id="inst-pitch-shift" min="-12" max="12" step="1" value="0" /></label>
+          </div>
+          <div class="grid-2">
+            <label class="field"><span>RVC output file type</span>
+              <select id="output-format"><option value="mp3">mp3</option><option value="wav">wav</option></select></label>
+            <label class="field"><span>Final output file type</span>
+              <select id="export-format-final"><option value="mp3">mp3</option><option value="wav">wav</option><option value="flac">flac</option></select></label>
+          </div>
+        </details>
+
+        <details class="accordion">
+          <summary>Hugging Face upload (optional)</summary>
+          <label class="check"><input type="checkbox" id="hf-upload" /> Push the generated cover to a HF model repo</label>
+          <div class="grid-2" id="hf-block" hidden>
+            <label class="field"><span>HF repo (username/repo)</span><input type="text" id="hf-repo-id" placeholder="your-name/ai-covers" /></label>
+            <label class="field"><span>HF token (write access)</span><input type="password" id="hf-token" placeholder="hf_…" /></label>
+          </div>
+        </details>
+      </div>
+
+      <div class="card">
+        <button class="btn btn-primary btn-lg" id="generate-btn">Generate AI cover</button>
+        <div class="progress" id="inference-progress" hidden><div class="progress-bar"></div></div>
+        <div class="result" id="result-block" hidden>
+          <div class="card-head"><h2>Result</h2></div>
+          <audio id="result-audio" controls></audio>
+          <div class="result-meta">
+            <span id="result-path" class="mono"></span>
+            <a class="btn btn-secondary btn-sm" id="result-download" download>Download</a>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- =============================== MODELS =============================== -->
+    <section class="panel" id="tab-models" hidden>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>Installed models</h2>
+          <button class="btn btn-ghost btn-sm" id="refresh-models-2">Refresh</button>
+        </div>
+        <div class="model-grid" id="installed-models"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Download from URL</h2></div>
+        <p class="hint">HuggingFace or Pixeldrain link (a .zip, or a comma-separated list of .pth/.index files).</p>
+        <div class="grid-2">
+          <label class="field"><span>Download link</span><input type="text" id="dl-url" placeholder="https://huggingface.co/…/model.zip" /></label>
+          <label class="field"><span>Model name</span><input type="text" id="dl-name" placeholder="MyVoice" /></label>
+        </div>
+        <button class="btn btn-primary" id="dl-btn">Download model</button>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Public model index</h2></div>
+        <div class="grid-2">
+          <label class="field"><span>Search</span><input type="search" id="pub-search" placeholder="name, description, credit…" /></label>
+        </div>
+        <div class="chips" id="pub-tags"></div>
+        <div class="table-wrap">
+          <table class="table" id="pub-table">
+            <thead><tr><th>Name</th><th>Description</th><th>Credit</th><th>Tags</th></tr></thead>
+            <tbody id="pub-tbody"></tbody>
+          </table>
+        </div>
+        <p class="hint" id="pub-hint">Select a row to fill the download form above, then press “Download model”.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Upload a local model (.zip)</h2></div>
+        <p class="hint">The zip must contain a .pth file (and optionally a .index file).</p>
+        <div class="grid-2">
+          <label class="field"><span>Model archive</span><input type="file" id="upload-zip" accept=".zip" /></label>
+          <label class="field"><span>Model name</span><input type="text" id="upload-name" placeholder="MyVoice" /></label>
+        </div>
+        <button class="btn btn-primary" id="upload-model-btn">Upload model</button>
+      </div>
+
+    </section>
+
+    <!-- ================================ TRAIN ================================ -->
+    <section class="panel" id="tab-train" hidden>
+
+      <div class="card">
+        <div class="card-head"><h2>Model name</h2></div>
+        <label class="field"><span>Experiment name</span><input type="text" id="train-model-name" placeholder="MyVoice" /></label>
+        <div class="chips" id="train-state-chips"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Data preparation</h2></div>
+        <div class="grid-2">
+          <label class="field"><span>Dataset folder <em>(server-side path)</em></span>
+            <input type="text" id="dataset-folder" placeholder="/path/to/audio" /></label>
+          <label class="field"><span>…or upload audio files</span><input type="file" id="dataset-files" multiple accept=".wav,.mp3,.flac,.ogg,.opus,.m4a,.aac,.wma,.aiff,.webm,.mp4" /></label>
+        </div>
+        <div class="grid-4">
+          <label class="field"><span>Sample rate (Hz)</span><select id="train-sample-rate"></select></label>
+          <label class="field"><span>F0 method</span><select id="train-f0-method"></select></label>
+          <label class="slider-field"><span>Segment (sec) — <b id="segment-len-val">3.0</b></span>
+            <input type="range" id="segment-len" min="1" max="10" step="0.1" value="3" /></label>
+          <label class="slider-field"><span>Mute files — <b id="include-mutes-val">2</b></span>
+            <input type="range" id="include-mutes" min="0" max="10" step="1" value="2" /></label>
+        </div>
+        <label class="check"><input type="checkbox" id="train-normalize" checked /> Normalize loudness</label>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="slice-btn">1 · Slice</button>
+          <button class="btn btn-primary" id="extract-btn" disabled>2 · Extract</button>
+          <button class="btn" id="index-btn" disabled>3 · Build index</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Training</h2></div>
+        <div class="grid-4">
+          <label class="slider-field"><span>Total epochs — <b id="total-epoch-val">300</b></span>
+            <input type="range" id="total-epoch" min="1" max="10000" step="1" value="300" /></label>
+          <label class="slider-field"><span>Save every N epochs — <b id="save-every-epoch-val">25</b></span>
+            <input type="range" id="save-every-epoch" min="1" max="100" step="1" value="25" /></label>
+          <label class="slider-field"><span>Batch size — <b id="train-batch-size-val">8</b></span>
+            <input type="range" id="train-batch-size" min="1" max="128" step="1" value="8" /></label>
+        </div>
+        <details class="accordion">
+          <summary>Advanced</summary>
+          <div class="grid-4">
+            <label class="field"><span>Vocoder</span><select id="train-vocoder"></select></label>
+            <label class="field"><span>Optimizer</span><select id="train-optimizer"></select></label>
+            <label class="field"><span>GPU</span><input type="text" id="train-gpus" value="0" /></label>
+            <label class="field"><span>Pretrain</span><select id="train-pretrain"></select></label>
+            <label class="field"><span>Custom pretrain G (path/URL)</span><input type="text" id="train-pretrain-g" /></label>
+            <label class="field"><span>Custom pretrain D (path/URL)</span><input type="text" id="train-pretrain-d" /></label>
+          </div>
+          <div class="check-grid">
+            <label class="check"><input type="checkbox" id="save-to-zip" /> Build ZIP at the end</label>
+            <label class="check"><input type="checkbox" id="save-half" checked /> float16 weights</label>
+          </div>
+        </details>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="train-btn">Start training</button>
+          <button class="btn btn-danger" id="train-stop-btn">Stop process</button>
+        </div>
+        <p class="hint">TensorBoard: <code>tensorboard --logdir logs</code> (the embedded board lives in the Gradio UI).</p>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Task log</h2></div>
+        <pre class="log" id="train-log"></pre>
+      </div>
+
+    </section>
+  </main>
+
+  <div class="toasts" id="toasts"></div>
+  <footer class="footer">
+    <span>AsukaRVC custom WebUI · REST API at <code>/api/v1</code> · classic Gradio UI: <code>python ui/app.py</code></span>
+  </footer>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>

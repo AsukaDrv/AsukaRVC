@@ -185,6 +185,10 @@ class Pipeline:
         ]
         self.autotune = Autotune(self.ref_freqs)
         self.note_dict = self.autotune.note_dict
+        # Cached F0 predictors: rebuilding RMVPE on every get_f0() call re-read
+        # the checkpoint and rebuilds the network for every audio segment.
+        self.model_rmvpe = None
+        self.model_fcpe = None
 
     def get_f0_crepe(
         self,
@@ -269,11 +273,14 @@ class Pipeline:
                     x, f0_min, f0_max, p_len, int(hop_length)
                 )
             elif method == "rmvpe":
-                self.model_rmvpe = RMVPE0Predictor(
-                    os.path.join(PREDICTORS_DIR, "rmvpe.pt"),
-                    is_half=self.is_half,
-                    device=self.device,
-                )
+                # Cache the predictor: the checkpoint is heavy and does not
+                # change between segments.
+                if self.model_rmvpe is None:
+                    self.model_rmvpe = RMVPE0Predictor(
+                        os.path.join(PREDICTORS_DIR, "rmvpe.pt"),
+                        is_half=self.is_half,
+                        device=self.device,
+                    )
                 f0 = self.model_rmvpe.infer_from_audio(x, thred=0.03)
                 f0 = f0[1:]
             elif method == "fcpe":
@@ -335,11 +342,13 @@ class Pipeline:
             )
         elif f0_method in ("rmvpe", "rmvpe+"):
             # "rmvpe+" is kept as a legacy alias of "rmvpe".
-            self.model_rmvpe = RMVPE0Predictor(
-                os.path.join(PREDICTORS_DIR, "rmvpe.pt"),
-                is_half=self.is_half,
-                device=self.device,
-            )
+            # Reuse the cached predictor across calls instead of rebuilding it.
+            if self.model_rmvpe is None:
+                self.model_rmvpe = RMVPE0Predictor(
+                    os.path.join(PREDICTORS_DIR, "rmvpe.pt"),
+                    is_half=self.is_half,
+                    device=self.device,
+                )
             f0 = self.model_rmvpe.infer_from_audio(x, thred=0.03)
         elif f0_method == "fcpe":
             self.model_fcpe = FCPEF0Predictor(
@@ -438,7 +447,7 @@ class Pipeline:
             feats = (
                 model.final_proj(feats[0]).unsqueeze(0) if version == "v1" else feats
             )
-        if protect < 0.5 and pitch != None and pitchf != None:
+        if protect < 0.5 and pitch is not None and pitchf is not None:
             feats0 = feats.clone()
         if (
             isinstance(index, type(None)) == False
@@ -462,18 +471,18 @@ class Pipeline:
             )
 
         feats = F.interpolate(feats.permute(0, 2, 1), scale_factor=2).permute(0, 2, 1)
-        if protect < 0.5 and pitch != None and pitchf != None:
+        if protect < 0.5 and pitch is not None and pitchf is not None:
             feats0 = F.interpolate(feats0.permute(0, 2, 1), scale_factor=2).permute(
                 0, 2, 1
             )
         p_len = audio0.shape[0] // self.window
         if feats.shape[1] < p_len:
             p_len = feats.shape[1]
-            if pitch != None and pitchf != None:
+            if pitch is not None and pitchf is not None:
                 pitch = pitch[:, :p_len]
                 pitchf = pitchf[:, :p_len]
 
-        if protect < 0.5 and pitch != None and pitchf != None:
+        if protect < 0.5 and pitch is not None and pitchf is not None:
             pitchff = pitchf.clone()
             pitchff[pitchf > 0] = 1
             pitchff[pitchf < 1] = protect
@@ -482,7 +491,7 @@ class Pipeline:
             feats = feats.to(feats0.dtype)
         p_len = torch.tensor([p_len], device=self.device).long()
         with torch.no_grad():
-            if pitch != None and pitchf != None:
+            if pitch is not None and pitchf is not None:
                 audio1 = (
                     (net_g.infer(feats, p_len, pitch, pitchf, sid)[0][0, 0])
                     .data.cpu()

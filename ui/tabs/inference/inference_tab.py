@@ -1,6 +1,5 @@
 import gradio as gr
 
-from programs.core import song_cover_pipeline, yt_download
 from ui.tabs.common import (
     AUDIO_EXTENSIONS,
     IS_ZERO_GPU,
@@ -17,6 +16,11 @@ from ui.tabs.common import (
 
 def inference_tab():
     """Build the "Generate" tab. Must be called inside a gr.Blocks context."""
+    # Lazy import: programs.core pulls in torch and the whole separation stack.
+    # Keeping it out of the module level lets the app (and the --ui web mode)
+    # boot on machines without the ML backend installed.
+    from programs.core import song_cover_pipeline, yt_download
+
     voice_models = get_current_models(rvc_models_dir)
     separation_model_names = get_separation_model_names()
     vocal_model_names = separation_model_names['vocals']
@@ -181,7 +185,7 @@ def inference_tab():
         )
         clear_btn.click(
             lambda: [0, 0, 0, 0, 0.5, 3, 0.25, 0.33, 'rmvpe', 128, 0, 0.15, 0.2, 0.8, 0.7, 1.0, 'mp3', 'mp3', None, True, 1, True, False, False, False, 0, 0,
-                     False, None, '', 0, 3, 0.5, 0.25, 0.33, 'rmvpe', 128, 'wav', False, False, 'contentvec',
+                     False, None, '', 0, 3, 0.5, 0.25, 0.33, 'rmvpe+', 128, 'wav', False, False, 'contentvec',
                      False, '', ''],
             outputs=[pitch, main_gain, backup_gain, inst_gain, index_rate, filter_radius, rms_mix_rate,
                      protect, f0_method, crepe_hop_length, pitch_all, reverb_rm_size, reverb_wet,
