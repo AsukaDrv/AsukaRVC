@@ -26,9 +26,9 @@ def inference_tab():
     deecho_model_names = separation_model_names['deecho']
 
     with gr.Tab("Inference"):
-
-        rvc_model = gr.Dropdown(voice_models, label='Voice Models')
-        ref_btn = gr.Button('Refresh Models 🔁', variant='primary')
+        with gr.Row():
+            rvc_model = gr.Dropdown(voice_models, label='Voice Models')
+            ref_btn = gr.Button('Refresh', variant='primary')
 
         with gr.Row():
 
