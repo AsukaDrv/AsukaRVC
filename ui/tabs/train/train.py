@@ -25,7 +25,7 @@ SAMPLE_RATES = [32000, 40000, 48000]
 DEFAULT_VOCODER = "HiFi-GAN"
 VOCODERS = ["HiFi-GAN", "MRF HiFi-GAN", "RefineGAN"]
 OPTIMIZERS = ["AdamW", "AdaBelief", "PolOpt"]
-F0_METHODS = ["rmvpe", "rmvpe+", "hpa-rmvpe"]
+F0_METHODS = ["rmvpe", "crepe", "fcpe"]
 AUDIO_EXTENSIONS = (".wav", ".mp3", ".flac", ".ogg", ".opus", ".m4a", ".aac", ".wma", ".aiff", ".webm", ".mp4")
 
 
