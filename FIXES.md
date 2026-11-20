@@ -142,13 +142,23 @@ Bugs fixed along the way in this round:
   the pipeline instance.
 - Style clean-up: `pitch != None` -> `pitch is not None`.
 
-### 5. `ui/tabs/train/train.py` — F0 method list did not match the backend
+### 5. `assets/model_installer.py` — every pretrain download URL was a 404
+- `_remote_url()` built `BASE_URL/<set>/<file>` while the paths in
+  `assets/pretrains.py` are documented as relative to
+  `pretrained/v2/<rate>/` — the `32k`/`40k`/`48k` segment was never inserted,
+  so every pretrain download (all 84 entries of the table) hit
+  `.../pretrained/v2/<Set>/<file>` and HuggingFace answered `404`.
+- Fix: the rate label is now part of the URL
+  (`BASE_URL/<rate>/<set dir>/<file>`), verified with an automated check that
+  HEAD-requests every URL generated from the table: 84/84 answer `HTTP 200`.
+
+### 6. `ui/tabs/train/train.py` — F0 method list did not match the backend
 - The Training tab offered `crepe` / `fcpe`, but the feature-extraction backend
   (`programs/rvc/lib/predictors/f0.py`) only supports `rmvpe`, `rmvpe+` and
   `hpa-rmvpe` — selecting the other two always crashed step 2 with
   `ValueError`. Fix: the dropdown now offers exactly the supported methods.
 
-### 6. PyTorch 2.6+ compatibility (`torch.load` / `weights_only`)
+### 7. PyTorch 2.6+ compatibility (`torch.load` / `weights_only`)
 - `programs/rvc/infer/infer.py` (`load_model`),
   `programs/rvc/lib/predictors/RMVPE.py`, `programs/rvc/lib/predictors/FCPE.py`:
   `torch.load` now passes `weights_only=False` explicitly. PyTorch 2.6 changed
@@ -158,7 +168,7 @@ Bugs fixed along the way in this round:
   matches pre-2.6 PyTorch. `train.py` already had a load fallback and is
   unchanged.
 
-### 7. `programs/music_separation_code/utils.py` — MSST separation fixes
+### 8. `programs/music_separation_code/utils.py` — MSST separation fixes
 - `windowingArray` was mutated in place (`window = windowingArray; window[:fade_size] = 1`),
   so the fade-in/fade-out tweaks persisted into every later batch and TTA pass,
   corrupting the crossfades. Fix: operate on a copy.

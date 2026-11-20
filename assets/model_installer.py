@@ -10,7 +10,7 @@ import os
 
 import requests
 
-from assets.pretrains import BASE_URL, pretrain_files
+from assets.pretrains import BASE_URL, pretrain_files, rate_label
 
 PRETRAINS_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "models", "pretrains"
@@ -19,10 +19,15 @@ PRETRAINS_DIR = os.path.join(
 _DOWNLOAD_CHUNK_SIZE = 1024 * 1024  # 1 MiB
 
 
-def _remote_url(kind, remote_path):
-    """Full URL of a pretrain file: BASE_URL + <set dir>/<G or D file>."""
+def _remote_url(remote_path, rate):
+    """Full URL of a pretrain file: BASE_URL/<rate>/<set dir>/<file>.
+
+    Paths in assets/pretrains.py are relative to ``pretrained/v2/<rate>/``,
+    so the rate segment (32k/40k/48k) must be inserted into the URL —
+    leaving it out produced 404s for every pretrain download.
+    """
     directory, filename = os.path.split(remote_path)
-    return f"{BASE_URL.rstrip('/')}/{directory}/{filename}"
+    return f"{BASE_URL.rstrip('/')}/{rate}/{directory}/{filename}"
 
 
 def download_with_progress(url, local_path):
@@ -81,9 +86,10 @@ def ensure_pretrains(vocoder, set_name, sample_rate):
             f"{int(sample_rate)} Hz. Choose another set or 'No pretrain'."
         )
     d_remote, g_remote = files
+    rate = rate_label(sample_rate)
 
-    d_url = _remote_url("D", d_remote)
-    g_url = _remote_url("G", g_remote)
+    d_url = _remote_url(d_remote, rate)
+    g_url = _remote_url(g_remote, rate)
     d_path = os.path.join(PRETRAINS_DIR, os.path.basename(d_remote))
     g_path = os.path.join(PRETRAINS_DIR, os.path.basename(g_remote))
 
