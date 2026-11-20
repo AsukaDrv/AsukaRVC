@@ -51,7 +51,8 @@ if __name__ == '__main__':
         inference_tab()
         downloader_tab()
         upload_tab()
-        training_tab()
+        with gr.Tab("Train"):
+            training_tab()
 
     print("-----------")
     print("AsukaRVC V3")
