@@ -28,14 +28,6 @@
     <button class="btn btn-danger btn-sm" id="job-stop">Stop</button>
   </div>
 
-  <div class="log-drawer" id="log-drawer" hidden>
-    <div class="log-drawer-head">
-      <span>Task log</span>
-      <button class="btn btn-ghost btn-sm" id="log-close">Close</button>
-    </div>
-    <pre id="log-output"></pre>
-  </div>
-
   <nav class="tabs" role="tablist">
     <button class="tab active" data-tab="inference" role="tab">Inference</button>
     <button class="tab" data-tab="models" role="tab">Models</button>
@@ -400,6 +392,17 @@
 
     </section>
   </main>
+
+  <!-- Task log sits below the page content, in the normal document flow,
+       so it never covers the UI. Toggle it with the Log button in the
+       running-job banner. -->
+  <div class="log-drawer" id="log-drawer" hidden>
+    <div class="log-drawer-head">
+      <span>Task log</span>
+      <button class="btn btn-ghost btn-sm" id="log-close">Close</button>
+    </div>
+    <pre id="log-output"></pre>
+  </div>
 
   <div class="toasts" id="toasts"></div>
   <footer class="footer">

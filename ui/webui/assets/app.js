@@ -128,7 +128,14 @@ async function watchJob(jobId, onFinished) {
   pollTimer = setInterval(poll, 1200);
 }
 
-$("job-log-toggle").addEventListener("click", () => { $("log-drawer").hidden = !$("log-drawer").hidden; });
+// The task log is a panel below the page content (never an overlay).
+// When the user opens it explicitly, bring it into view; when a job
+// auto-opens it on start, the page is left where the user was.
+$("job-log-toggle").addEventListener("click", () => {
+  const drawer = $("log-drawer");
+  drawer.hidden = !drawer.hidden;
+  if (!drawer.hidden) drawer.scrollIntoView({ behavior: "smooth", block: "nearest" });
+});
 $("log-close").addEventListener("click", () => { $("log-drawer").hidden = true; });
 $("job-stop").addEventListener("click", async () => {
   try {

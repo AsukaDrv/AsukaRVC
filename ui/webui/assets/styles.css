@@ -297,27 +297,42 @@ input[type="range"]::-moz-range-thumb {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Task log lives below the page content, in the normal document flow.
+   No fixed positioning: it can never cover the UI, it simply appears
+   under the cards (matching the 1012px content width of the job banner).
+   The "Log" button in the job banner toggles it; "Close" hides it again. */
 .log-drawer {
-  position: fixed; right: 0; top: 0; bottom: 0; z-index: 100;
-  width: min(560px, 92vw);
-  background: #0a0c10;
-  border-left: 1px solid var(--border);
+  max-width: 1012px;
+  margin: 16px auto 0;
+  background: var(--bg);
   display: flex; flex-direction: column;
-  box-shadow: -10px 0 30px rgba(0, 0, 0, 0.5);
 }
 .log-drawer-head {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 12px 16px; border-bottom: 1px solid var(--border);
+  background: #0a0c10;
+  border: 1px solid var(--border); border-bottom: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+  padding: 10px 16px;
   font-weight: 600;
 }
 .log-drawer pre, .log {
-  flex: 1; overflow: auto; margin: 0;
+  overflow: auto; margin: 0;
   padding: 14px 16px;
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.78rem; line-height: 1.55;
   color: #c6cbd8;
   white-space: pre-wrap; word-break: break-word;
 }
+/* Terminal window below the UI: fixed height, scrolls inside. */
+.log-drawer pre {
+  height: 360px;
+  background: #0a0c10;
+  border: 1px solid var(--border);
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+/* In-card log (Train tab): bounded height so it scrolls instead of
+   stretching the page. */
+.log { max-height: 360px; }
 
 /* ------------------------------------------------------------- models */
 

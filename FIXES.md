@@ -136,6 +136,24 @@ copies them into the user's Google Drive so they survive the runtime.
   "Save to Google Drive" button next to the result and the auto-save accordion
   only when the server reports a Colab runtime.
 
+## Web UI: task log moved below the page content
+
+The custom WebUI rendered the task log as a `position: fixed` right-side drawer
+that slid over the forms (it covered the settings cards on narrow screens and
+colabs). It is now a regular panel in the document flow, placed after the tab
+content and before the footer:
+
+- `ui/webui/index.html`: the `#log-drawer` block moved below `</main>`.
+- `ui/webui/assets/styles.css`: the drawer lost its fixed positioning and z-index;
+  it is a centred 1012px terminal panel (same width as the job banner and the
+  cards) with a 360px scrolling log area. The Train-tab log card gets the same
+  360px bound so long training logs scroll inside the card instead of stretching
+  the page.
+- `ui/webui/assets/app.js`: opening the log via the "Log" button in the job
+  banner scrolls the panel into view; jobs that auto-open the log on start no
+  longer shift the page the user is looking at (nothing floats above the UI at
+  any point).
+
 ## Critical bugs
 
 ### 1. `programs/rvc/lib/tools/model_download.py` — module crashed the whole app at import time
@@ -241,6 +259,15 @@ copies them into the user's Google Drive so they survive the runtime.
 - `windowingArray` was mutated in place (`window = windowingArray; window[:fade_size] = 1`),
   so the fade-in/fade-out tweaks persisted into every later batch and TTA pass,
   corrupting the crossfades. Fix: operate on a copy.
+- The first revision of the copy used numpy-style `.copy()`, but `_getWindowingArray()`
+  builds the window with `torch.linspace` / `torch.ones`, i.e. it returns a **torch
+  Tensor** — and tensors have no `.copy()` method. Every separation run therefore
+  crashed at the first batch with
+  `AttributeError: 'Tensor' object has no attribute 'copy'. Did you mean: 'copy_'?`
+  (right after the `Processing audio chunks` progress bar appeared). Fix: the
+  window is cloned with `Tensor.clone()`, which copies the values without
+  sharing storage and keeps the array a tensor so it multiplies with the
+  torch result/counter buffers below.
 - Replaced the deprecated `torch.cuda.amp.autocast` with
   `torch.amp.autocast("cuda", ...)`, additionally disabling AMP when CUDA is
   unavailable (requesting CUDA autocast on a CPU-only machine raises

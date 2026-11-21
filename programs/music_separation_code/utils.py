@@ -134,7 +134,10 @@ def demix_track(config, model, mix, device, pbar=False):
                     # below must not persist into the next batch or the next
                     # TTA pass (the old code mutated the shared array in place,
                     # corrupting the crossfades of all later chunks).
-                    window = windowingArray.copy()
+                    # NOTE: the window is a torch Tensor, so it must be
+                    # cloned with .clone() — Tensor has no numpy-style
+                    # .copy() method.
+                    window = windowingArray.clone()
                     if i - step == 0:  # First audio chunk, no fadein
                         window[:fade_size] = 1
                     elif i >= mix.shape[1]:  # Last audio chunk, no fadeout
