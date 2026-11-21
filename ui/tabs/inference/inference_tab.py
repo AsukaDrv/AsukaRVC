@@ -107,12 +107,13 @@ def inference_tab():
                 with gr.Row():
                     duet_model = gr.Dropdown(voice_models, label='Second voice model')
                     duet_mode = gr.Dropdown(
-                        ['alternate', 'sequential', 'overlap'], value='alternate', label='Duet style',
-                        info='alternate = voices swap every N seconds · sequential = A sings the first part, B the rest · overlap = both sing together',
+                        ['auto', 'alternate', 'sequential', 'overlap'], value='auto', label='Duet style',
+                        info='auto = voices swap at vocal phrase boundaries (recommended) · alternate = timed swaps every N seconds, snapped to phrase pauses · sequential = A sings the first part, B the rest · overlap = both sing together',
                     )
                 with gr.Row():
                     duet_split = gr.Slider(5, 95, value=50, step=1, label='Sequential split (%) — where the second voice takes over')
                     duet_interval = gr.Slider(5, 60, value=15, step=1, label='Alternate interval (seconds per voice)')
+                    duet_pitch = gr.Slider(-12, 12, value=0, step=1, label='Second voice pitch offset (semitones)', info='Shift only the second voice, e.g. +12 to put a female model over a male original')
             duet_enabled.change(show_backing_vocals_rvc_inputs, inputs=duet_enabled, outputs=duet_col)
 
         with gr.Accordion('Backing Vocals RVC (optional)', open=False):
@@ -208,7 +209,7 @@ def inference_tab():
                 protect_back, pitch_extract_back, hop_length_back,
                 export_format_rvc_back, split_audio_back, autotune_back, embedder_model_back,
                 hf_upload, hf_repo_id, hf_token,
-                duet_enabled, duet_model, duet_mode, duet_split, duet_interval,
+                duet_enabled, duet_model, duet_mode, duet_split, duet_interval, duet_pitch,
                 save_drive, drive_folder,
             ],
             outputs=[ai_cover]
@@ -217,7 +218,7 @@ def inference_tab():
             lambda: [0, 0, 0, 0, 0.5, 3, 0.25, 0.33, 'rmvpe', 128, 0, 0.15, 0.2, 0.8, 0.7, 1.0, 'mp3', 'mp3', None, True, 1, True, False, False, False, 0, 0,
                      False, None, '', 0, 3, 0.5, 0.25, 0.33, 'rmvpe+', 128, 'wav', False, False, 'contentvec',
                      False, '', '',
-                     False, None, 'alternate', 50, 15,
+                     False, None, 'auto', 50, 15, 0,
                      False, DEFAULT_DRIVE_FOLDER],
             outputs=[pitch, main_gain, backup_gain, inst_gain, index_rate, filter_radius, rms_mix_rate,
                      protect, f0_method, crepe_hop_length, pitch_all, reverb_rm_size, reverb_wet,
@@ -230,6 +231,6 @@ def inference_tab():
                      protect_back, pitch_extract_back, hop_length_back,
                      export_format_rvc_back, split_audio_back, autotune_back, embedder_model_back,
                      hf_upload, hf_repo_id, hf_token,
-                     duet_enabled, duet_model, duet_mode, duet_split, duet_interval,
+                     duet_enabled, duet_model, duet_mode, duet_split, duet_interval, duet_pitch,
                      save_drive, drive_folder]
         )

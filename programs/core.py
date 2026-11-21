@@ -778,8 +778,8 @@ def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
                         export_format_rvc_back='wav', split_audio_back=False, autotune_back=False,
                         embedder_model_back='contentvec',
                         hf_upload=False, hf_repo_id="", hf_token="",
-                        duet_enabled=False, duet_model=None, duet_mode="alternate",
-                        duet_split=50, duet_interval=15,
+                        duet_enabled=False, duet_model=None, duet_mode="auto",
+                        duet_split=50, duet_interval=15, duet_pitch=0,
                         save_drive=False, drive_folder=DEFAULT_DRIVE_FOLDER,
                         batch_size=1, use_tta=False, progress=gr.Progress()):
     """
@@ -873,10 +873,19 @@ def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
                 raise_exception('The duet second voice must be different from the main voice model.', is_webui)
             if duet_mode not in DUET_MODES:
                 raise_exception(f'Unknown duet mode "{duet_mode}". Choose from: {", ".join(DUET_MODES)}.', is_webui)
+            duet_pitch = float(duet_pitch or 0)
+            if not -12 <= duet_pitch <= 12:
+                raise_exception('The duet second-voice pitch offset must be between -12 and 12 semitones.', is_webui)
             display_progress('[~] Converting the second duet voice using RVC...', 0.55, is_webui, progress)
-            duet_vocals_path = os.path.join(song_dir, f'{music_folder}_{duet_model}_p{pitch_change}_i{index_rate}_fr{filter_radius}_rms{rms_mix_rate}_pro{protect}_{f0_method}{"" if f0_method != "mangio-crepe" else f"_{crepe_hop_length}"}.wav')
+            # The second voice can sit at its own pitch (semitone offset,
+            # e.g. +12 to put a female model over a male original). The
+            # cache name carries the offset so takes are never reused
+            # across different offsets.
+            duet_pitch_tag = f"_dp{int(duet_pitch)}" if duet_pitch else ""
+            duet_vocals_path = os.path.join(song_dir, f'{music_folder}_{duet_model}_p{pitch_change}{duet_pitch_tag}_i{index_rate}_fr{filter_radius}_rms{rms_mix_rate}_pro{protect}_{f0_method}{"" if f0_method != "mangio-crepe" else f"_{crepe_hop_length}"}.wav')
             if not os.path.exists(duet_vocals_path):
-                voice_change(duet_model, main_vocals_dereverb_path, duet_vocals_path, pitch_change, f0_method,
+                voice_change(duet_model, main_vocals_dereverb_path, duet_vocals_path,
+                             float(pitch_change) + duet_pitch / 12.0, f0_method,
                              index_rate, filter_radius, rms_mix_rate, protect, crepe_hop_length, is_webui,
                              embedder_model, split_audio, autotune)
             display_progress('[~] Building the duet vocal track...', 0.6, is_webui, progress)
@@ -1073,9 +1082,10 @@ if __name__ == '__main__':
     # Duet cover options
     parser.add_argument('-duet', '--duet-enabled', action='store_true', help='Build a duet cover: a second RVC model sings part of the song.')
     parser.add_argument('-duet-model', '--duet-model', type=str, default=None, help='Name of the RVC model folder used as the second duet voice.')
-    parser.add_argument('-duet-mode', '--duet-mode', type=str, default='alternate', choices=DUET_MODES, help='Duet style: alternate (swap every N seconds), sequential (A then B) or overlap (both voices).')
+    parser.add_argument('-duet-mode', '--duet-mode', type=str, default='auto', choices=DUET_MODES, help='Duet style: auto (swap at vocal phrase boundaries), alternate (timed swaps, phrase-snapped), sequential (A then B) or overlap (both voices).')
     parser.add_argument('-duet-split', '--duet-split', type=float, default=50, help='Sequential mode: percent of the song sung by voice A (1-99).')
-    parser.add_argument('-duet-interval', '--duet-interval', type=float, default=15, help='Alternate mode: seconds per voice before swapping.')
+    parser.add_argument('-duet-interval', '--duet-interval', type=float, default=15, help='Alternate/auto-fallback mode: seconds per voice before swapping.')
+    parser.add_argument('-duet-pitch', '--duet-pitch', type=float, default=0, help='Semitone offset for the second duet voice (-12 to 12).')
     # Google Drive (Colab) options
     parser.add_argument('-drive', '--save-drive', action='store_true', help='Save the final cover to Google Drive (Colab only; auto-mounts Drive).')
     parser.add_argument('-drive-folder', '--drive-folder', type=str, default=DEFAULT_DRIVE_FOLDER, help="Drive folder under 'MyDrive' where covers are saved.")
@@ -1133,6 +1143,7 @@ if __name__ == '__main__':
         duet_mode=args.duet_mode,
         duet_split=args.duet_split,
         duet_interval=args.duet_interval,
+        duet_pitch=args.duet_pitch,
         save_drive=args.save_drive,
         drive_folder=args.drive_folder,
         batch_size=args.batch_size,

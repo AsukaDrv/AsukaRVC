@@ -370,9 +370,10 @@ class InferenceRequest(BaseModel):
     hf_token: str = ""
     duet_enabled: bool = False
     duet_model: str | None = None
-    duet_mode: str = "alternate"
+    duet_mode: str = "auto"
     duet_split: float = 50
     duet_interval: float = 15
+    duet_pitch: float = 0
     save_drive: bool = False
     drive_folder: str = DEFAULT_DRIVE_FOLDER
     batch_size: int = 1
@@ -401,6 +402,8 @@ def start_inference(req: InferenceRequest):
             raise HTTPException(status_code=400, detail="The duet split point must be between 1 and 99 percent.")
         if req.duet_interval < 1:
             raise HTTPException(status_code=400, detail="The duet interval must be at least 1 second.")
+        if not -12 <= req.duet_pitch <= 12:
+            raise HTTPException(status_code=400, detail="The duet second-voice pitch offset must be between -12 and 12 semitones.")
     if req.save_drive and not in_colab():
         raise HTTPException(status_code=400, detail="Google Drive save is only available in Google Colab.")
 
@@ -474,6 +477,7 @@ def start_inference(req: InferenceRequest):
             duet_mode=req.duet_mode,
             duet_split=req.duet_split,
             duet_interval=req.duet_interval,
+            duet_pitch=req.duet_pitch,
             save_drive=req.save_drive,
             drive_folder=req.drive_folder,
             batch_size=req.batch_size,

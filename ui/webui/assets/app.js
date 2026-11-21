@@ -341,6 +341,7 @@ bindSlider("reverb-width", (v) => Number(v).toFixed(2));
 bindSlider("inst-pitch-shift");
 bindSlider("duet-split");
 bindSlider("duet-interval");
+bindSlider("duet-pitch");
 bindSlider("segment-len", (v) => Number(v).toFixed(1));
 bindSlider("include-mutes");
 bindSlider("total-epoch");
@@ -421,6 +422,7 @@ function buildInferenceBody() {
     duet_mode: value("duet-mode"),
     duet_split: Number(value("duet-split")),
     duet_interval: Number(value("duet-interval")),
+    duet_pitch: Number(value("duet-pitch")),
     save_drive: checked("save-drive"),
     drive_folder: value("drive-folder") || "AsukaRVC",
   };

@@ -149,7 +149,8 @@
               <label class="field">
                 <span>Duet style</span>
                 <select id="duet-mode">
-                  <option value="alternate">Alternate — voices swap every N seconds</option>
+                  <option value="auto">Auto — voices swap at vocal phrase boundaries</option>
+                  <option value="alternate">Alternate — timed swaps every N seconds (phrase-snapped)</option>
                   <option value="sequential">Sequential — A sings the first part, B the rest</option>
                   <option value="overlap">Overlap — both voices sing together</option>
                 </select>
@@ -161,7 +162,11 @@
               <label class="slider-field"><span>Alternate interval (seconds per voice) — <b id="duet-interval-val">15</b></span>
                 <input type="range" id="duet-interval" min="5" max="60" step="1" value="15" /></label>
             </div>
-            <p class="hint">The song is converted once per voice model, then both takes are woven into one duet vocal track with short crossfades. The second model must differ from the main one.</p>
+            <div class="grid-2">
+              <label class="slider-field"><span>Second voice pitch offset (semitones) — <b id="duet-pitch-val">0</b></span>
+                <input type="range" id="duet-pitch" min="-12" max="12" step="1" value="0" /></label>
+            </div>
+            <p class="hint">The song is converted once per voice model, then both takes are woven into one duet vocal track with short crossfades. Auto mode detects the pauses between sung lines and switches voices there, so nobody sings over a word. The pitch offset shifts only the second voice (e.g. +12 to put a female model over a male original). The second model must differ from the main one.</p>
           </div>
         </details>
 

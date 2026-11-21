@@ -154,6 +154,53 @@ content and before the footer:
   longer shift the page the user is looking at (nothing floats above the UI at
   any point).
 
+## Duet rework: phrase-aligned voice switching (researched)
+
+The first duet implementation swapped voices on wall-clock marks (every N
+seconds / at a raw percent of the duration), which cuts sung lines mid-word.
+Real duet covers from the weights.gg era switch voices per vocal phrase.
+weights.gg itself shut down on 31 March 2026 and its domain is excluded from
+the Wayback Machine, so the mechanism was verified against the surviving
+platform of that era — Jammable, which documents its duet feature openly in
+its official guide. The rules that matter:
+
+* the vocals are converted once per voice model and woven together (our
+  pipeline already matched this);
+* "auto pick" detects where the singing changes and assigns each detected
+  phrase to the next voice in turn — never fixed time windows;
+* parts shorter than ~2.5 seconds are merged into a neighbouring part;
+* each voice can sit at its own pitch (a semitone offset per voice).
+
+What changed in this repo:
+
+- `programs/duet_cover.py`: new `detect_vocal_phrases()` — a numpy RMS
+  envelope (50 ms hops) with hysteresis thresholds (-38 / -45 dBFS), short-gap
+  merging (a <350 ms breath does not split a phrase) and a minimum part
+  length (2.5 s, the same rule the web duet editors use); the returned parts
+  cover the whole take (gaps are split evenly between neighbours) so no
+  audio is dropped. New default mode `auto` assigns the detected phrases to
+  the voices in turn (A, B, A, …); when a take has no usable phrase
+  structure (continuous singing) it falls back to timed swaps so both voices
+  still get a turn. `alternate` and `sequential` keep their sliders but every
+  swap now snaps to the nearest phrase boundary (alternate: max 5 s drift),
+  so voice changes land in the pauses between lines instead of mid-word.
+  `overlap` is unchanged, and the crossfade can no longer exceed a quarter of
+  the shortest segment.
+- `programs/core.py`: new `duet_pitch` parameter — a semitone offset applied
+  only to the second voice's conversion (-12..+12; e.g. +12 to put a female
+  model over a male original), carried in the cache filename so takes are
+  never reused across offsets. `duet_mode` defaults to `auto`; CLI gained
+  `-duet-pitch` and the `-duet-mode` help reflects the new styles.
+- REST API: `duet_mode` defaults to `auto` and a new `duet_pitch` field is
+  validated (HTTP 400 outside -12..12).
+- Both UIs: `auto` is the default duet style and a second-voice pitch slider
+  was added (Gradio slider + web slider), with updated hints.
+- Tests: 15 new checks (phrase detection on gapped audio, mid-gap boundaries,
+  full-timeline coverage, short-phrase merging, per-phrase round-robin in
+  `auto`, sequential/alternate snapping, the auto fallback on continuous
+  singing, `duet_pitch` validation) — the duet + drive suite now passes
+  56/56; the 39-check fix suite and the Gradio/web e2e suites still pass.
+
 ## Critical bugs
 
 ### 1. `programs/rvc/lib/tools/model_download.py` — module crashed the whole app at import time
@@ -303,11 +350,12 @@ content and before the footer:
   background job (log streamed, status polled to `finished`), the new model
   appears in `GET /api/v1/models`, unknown models are rejected with `400`,
   and `GET /api/v1/files` rejects paths outside the allowed roots with `403`.
-- Duet + Drive feature test (`scripts/test_duet_drive_features.py`, 41 checks):
+- Duet + Drive feature test (`scripts/test_duet_drive_features.py`, 56 checks):
   the duet weaving is verified with real audio (a loud and a quiet take are
-  woven in alternate / sequential / overlap mode and the RMS per segment
-  proves which voice sings where; input-length trimming and parameter
-  validation are covered), the Drive helper is exercised against a fake drive
+  woven in auto / alternate / sequential / overlap mode and the RMS per segment
+  proves which voice sings where), phrase detection and phrase-aligned swaps
+  are covered with gapped audio, input-length trimming and parameter
+  validation are included, the Drive helper is exercised against a fake drive
   root (copy, collision suffixes, folder validation, missing files), Colab
   detection is checked both ways, and the web API layer is driven through
   FastAPI's TestClient: duet 400 validations, Drive-only guards (400 / 403)
