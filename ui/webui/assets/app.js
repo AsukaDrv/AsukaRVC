@@ -192,6 +192,7 @@ async function loadOptions() {
 
   fillSelect("voice-model", options.voice_models.map((m) => m.name));
   fillSelect("backing-model", options.voice_models.map((m) => m.name));
+  fillSelect("duet-model", options.voice_models.map((m) => m.name));
   fillSelect("f0-method", options.f0_methods);
   fillSelect("embedder-model", options.embedders);
   fillSelect("embedder-model-back", options.embedders);
@@ -199,6 +200,13 @@ async function loadOptions() {
   fillSelect("export-format-final", options.final_formats);
   fillSelect("export-format-rvc-back", ["wav", "flac", "mp3"]);
 
+  // Google Drive saving only exists inside a Colab runtime.
+  const inColab = !!options.colab;
+  $("drive-accordion").hidden = !inColab;
+  $("result-drive-btn").hidden = !inColab;
+  if (inColab && !value("drive-folder")) {
+    $("drive-folder").value = options.drive_folder || "AsukaRVC";
+  }
   const separation = options.separation || {};
   fillSelect("vocal-model-name", separation.vocals || []);
   fillSelect("karaoke-model-name", separation.karaoke || []);
@@ -240,6 +248,7 @@ async function refreshVoiceModels() {
   state.options.voice_models = data.models;
   fillSelect("voice-model", data.models.map((m) => m.name));
   fillSelect("backing-model", data.models.map((m) => m.name));
+  fillSelect("duet-model", data.models.map((m) => m.name));
   $("models-hint").textContent = data.models.length
     ? `${data.models.length} model(s) installed.`
     : "No models installed yet — grab one in the Models tab.";
@@ -323,6 +332,8 @@ bindSlider("reverb-dry", (v) => Number(v).toFixed(2));
 bindSlider("reverb-damping", (v) => Number(v).toFixed(2));
 bindSlider("reverb-width", (v) => Number(v).toFixed(2));
 bindSlider("inst-pitch-shift");
+bindSlider("duet-split");
+bindSlider("duet-interval");
 bindSlider("segment-len", (v) => Number(v).toFixed(1));
 bindSlider("include-mutes");
 bindSlider("total-epoch");
@@ -332,6 +343,7 @@ bindSlider("train-batch-size");
 $("f0-method").addEventListener("change", () => { $("crepe-hop-block").hidden = $("f0-method").value !== "crepe"; });
 $("infer-backing-vocals").addEventListener("change", () => { $("backing-block").hidden = !$("infer-backing-vocals").checked; });
 $("hf-upload").addEventListener("change", () => { $("hf-block").hidden = !$("hf-upload").checked; });
+$("duet-enabled").addEventListener("change", () => { $("duet-block").hidden = !$("duet-enabled").checked; });
 
 const checked = (id) => $(id).checked;
 const value = (id) => $(id).value;
@@ -340,6 +352,9 @@ function buildInferenceBody() {
   const songInput = currentSongInput();
   if (!songInput) throw new Error("Provide a song file or URL first.");
   if (!value("voice-model")) throw new Error("Select a voice model first.");
+  const duetEnabled = checked("duet-enabled");
+  if (duetEnabled && !value("duet-model")) throw new Error("Select the second duet voice model, or disable the duet option.");
+  if (duetEnabled && value("duet-model") === value("voice-model")) throw new Error("The duet second voice must be different from the main voice model.");
   return {
     song_input: songInput,
     voice_model: value("voice-model"),
@@ -394,8 +409,17 @@ function buildInferenceBody() {
     hf_upload: checked("hf-upload"),
     hf_repo_id: value("hf-repo-id"),
     hf_token: value("hf-token"),
+    duet_enabled: duetEnabled,
+    duet_model: duetEnabled ? value("duet-model") : null,
+    duet_mode: value("duet-mode"),
+    duet_split: Number(value("duet-split")),
+    duet_interval: Number(value("duet-interval")),
+    save_drive: checked("save-drive"),
+    drive_folder: value("drive-folder") || "AsukaRVC",
   };
 }
+
+let lastCoverPath = null;
 
 $("generate-btn").addEventListener("click", () => {
   $("result-block").hidden = true;
@@ -409,6 +433,7 @@ $("generate-btn").addEventListener("click", () => {
   startJob("/jobs/inference", body, (job) => {
     const output = job.result && job.result.output;
     if (output && job.result.url) {
+      lastCoverPath = output;
       $("result-audio").src = job.result.url;
       $("result-download").href = job.result.download_url || job.result.url;
       $("result-download").setAttribute("download", output.split("/").pop());
@@ -418,6 +443,15 @@ $("generate-btn").addEventListener("click", () => {
     } else {
       toast("Task finished, but no output file was reported — check the log.", "error");
     }
+  });
+});
+
+/* Copy the last generated cover into the user's Google Drive (Colab only —
+ * the button stays hidden everywhere else). */
+$("result-drive-btn").addEventListener("click", () => {
+  if (!lastCoverPath) { toast("Generate a cover first.", "error"); return; }
+  startJob("/jobs/save-drive", { path: lastCoverPath, folder: value("drive-folder") || "AsukaRVC" }, () => {
+    toast("Cover saved to Google Drive!", "success");
   });
 });
 

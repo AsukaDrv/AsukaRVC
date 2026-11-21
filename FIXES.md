@@ -75,6 +75,67 @@ Bugs fixed along the way in this round:
   the whole separation stack) at module level; the import is now lazy inside
   the builder, matching the strategy already used by `ui/utils/jobs.py`.
 
+## New features: duet covers (weights.gg style) and Google Drive save in Colab
+
+### Duet cover — two AI voices on one cover
+
+A new "Duet Cover" option lets a second RVC voice model sing part of the song,
+the way weights.gg duets worked. The song is converted once per voice model,
+then both takes are woven into one duet vocal track that replaces the main
+vocals downstream (effects, backing mix, final export); the output is named
+`<song> (<Model A> x <Model B> Duet).<ext>`.
+
+- `programs/duet_cover.py` (new, torch-free): `DUET_MODES` and
+  `build_duet_vocals()` with three styles — `alternate` (voices swap every N
+  seconds), `sequential` (voice A sings the first X %, voice B the rest) and
+  `overlap` (both voices sing together). Every segment boundary gets a short
+  equal-power crossfade (80 ms, clamped for very short segments) so the voice
+  switch does not click; takes are trimmed to the shorter length because RVC
+  conversion can shift duration by a few samples. Kept free of torch so the
+  web API validates duet requests before the ML stack is loaded.
+- `programs/core.py`: new `duet_enabled / duet_model / duet_mode / duet_split /
+  duet_interval` parameters on `song_cover_pipeline`. The second voice is
+  converted with the same RVC options and cached per-model (a repeated run
+  with different duet settings reuses the two conversions). The merged duet
+  track is cached by mode+split/interval and cleaned up as an intermediate
+  file. Validation: the second model must be set, installed and different
+  from the main model; modes are restricted to `DUET_MODES`. The CLI gained
+  matching flags (`-duet`, `-duet-model`, `-duet-mode`, `-duet-split`,
+  `-duet-interval`).
+- Gradio UI (`ui/tabs/inference/inference_tab.py`): "Duet Cover — two AI
+  voices" accordion with the enable checkbox, second-model dropdown, style
+  dropdown and split/interval sliders; wired into Generate and Clear.
+- Web UI: `InferenceRequest` gained the duet fields with full validation
+  (unknown model, same-model duet, bogus mode, out-of-range split/interval ->
+  readable HTTP 400), the job title shows both voices, `/options` advertises
+  `duet_modes`, and the frontend (`ui/webui/index.html` + `app.js`) has a duet
+  accordion whose second-model select stays in sync with the model list.
+
+### Google Drive save — Colab only
+
+Generated covers live on the ephemeral Colab VM disk; the new Drive feature
+copies them into the user's Google Drive so they survive the runtime.
+
+- `programs/colab_drive.py` (new): `in_colab()` detection (`google.colab`
+  import, `/content` fallback), `ensure_drive_mounted()` (auto-mounts on
+  first save) and `save_file_to_drive()` which copies a result into
+  `<mount>/MyDrive/<folder>/` with ` (1)`, ` (2)` … collision suffixes and
+  traversal/absolute-folder validation.
+- `programs/core.py`: `save_drive` / `drive_folder` parameters on
+  `song_cover_pipeline` save the final cover right after the mix; failures
+  are logged (and surfaced as a Gradio warning) without losing the local
+  cover. CLI flags: `-drive`, `-drive-folder`.
+- Gradio UI: a "Google Drive (Colab)" accordion appears only when the app
+  runs inside Colab (`in_colab()`), with an auto-save checkbox and a folder
+  field.
+- Web UI: `/options` advertises `colab` + `drive_folder`, `InferenceRequest`
+  accepts `save_drive` / `drive_folder` (rejected with HTTP 400 outside
+  Colab), and a new `POST /api/v1/jobs/save-drive` endpoint copies an already
+  generated cover as a background job. For security it only accepts files
+  inside the song output directory (HTTP 403 otherwise). The frontend shows a
+  "Save to Google Drive" button next to the result and the auto-save accordion
+  only when the server reports a Colab runtime.
+
 ## Critical bugs
 
 ### 1. `programs/rvc/lib/tools/model_download.py` — module crashed the whole app at import time
@@ -215,3 +276,12 @@ Bugs fixed along the way in this round:
   background job (log streamed, status polled to `finished`), the new model
   appears in `GET /api/v1/models`, unknown models are rejected with `400`,
   and `GET /api/v1/files` rejects paths outside the allowed roots with `403`.
+- Duet + Drive feature test (`scripts/test_duet_drive_features.py`, 41 checks):
+  the duet weaving is verified with real audio (a loud and a quiet take are
+  woven in alternate / sequential / overlap mode and the RMS per segment
+  proves which voice sings where; input-length trimming and parameter
+  validation are covered), the Drive helper is exercised against a fake drive
+  root (copy, collision suffixes, folder validation, missing files), Colab
+  detection is checked both ways, and the web API layer is driven through
+  FastAPI's TestClient: duet 400 validations, Drive-only guards (400 / 403)
+  and a full `save-drive` job lifecycle with a stubbed copy helper.

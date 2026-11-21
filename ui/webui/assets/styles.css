@@ -382,6 +382,7 @@ input[type="range"]::-moz-range-thumb {
   margin-top: 10px; flex-wrap: wrap;
 }
 .result-meta .mono { max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.result-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
 /* ------------------------------------------------------------- toasts */
 

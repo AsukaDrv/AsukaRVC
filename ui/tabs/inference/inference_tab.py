@@ -1,5 +1,6 @@
 import gradio as gr
 
+from programs.colab_drive import DEFAULT_DRIVE_FOLDER, in_colab
 from ui.tabs.common import (
     AUDIO_EXTENSIONS,
     IS_ZERO_GPU,
@@ -97,6 +98,23 @@ def inference_tab():
                 autotune = gr.Checkbox(value=False, label='Autotune')
                 embedder_model = gr.Dropdown(['contentvec'], value='contentvec', label='Embedder Model')
 
+        with gr.Accordion('Duet Cover — two AI voices (optional)', open=False):
+            gr.Markdown(
+                '### Weights.gg style duets: pick a second voice model and how the two voices share the song'
+            )
+            duet_enabled = gr.Checkbox(value=False, label='Enable duet: a second voice model sings part of the song')
+            with gr.Column(visible=False) as duet_col:
+                with gr.Row():
+                    duet_model = gr.Dropdown(voice_models, label='Second voice model')
+                    duet_mode = gr.Dropdown(
+                        ['alternate', 'sequential', 'overlap'], value='alternate', label='Duet style',
+                        info='alternate = voices swap every N seconds · sequential = A sings the first part, B the rest · overlap = both sing together',
+                    )
+                with gr.Row():
+                    duet_split = gr.Slider(5, 95, value=50, step=1, label='Sequential split (%) — where the second voice takes over')
+                    duet_interval = gr.Slider(5, 60, value=15, step=1, label='Alternate interval (seconds per voice)')
+            duet_enabled.change(show_backing_vocals_rvc_inputs, inputs=duet_enabled, outputs=duet_col)
+
         with gr.Accordion('Backing Vocals RVC (optional)', open=False):
             infer_backing_vocals = gr.Checkbox(value=False, label='Infer Backing Vocals with separate RVC model')
             with gr.Column(visible=False) as backing_rvc_col:
@@ -152,6 +170,16 @@ def inference_tab():
                 hf_repo_id = gr.Textbox(label='HF repo (username/repo)', placeholder='your-name/ai-covers')
                 hf_token = gr.Textbox(label='HF token (write access)', type='password', placeholder='hf_...')
 
+        if in_colab():
+            with gr.Accordion('Google Drive (Colab)', open=False):
+                gr.Markdown('### Copy the generated cover to your Google Drive so it survives the Colab runtime')
+                save_drive = gr.Checkbox(value=False, label='Auto-save the result to Google Drive')
+                drive_folder = gr.Textbox(label='Drive folder (under MyDrive)', value=DEFAULT_DRIVE_FOLDER,
+                                          placeholder=DEFAULT_DRIVE_FOLDER)
+        else:
+            save_drive = gr.Checkbox(value=False, visible=False, label='Auto-save the result to Google Drive')
+            drive_folder = gr.Textbox(visible=False, value=DEFAULT_DRIVE_FOLDER, label='Drive folder (under MyDrive)')
+
         with gr.Row():
             clear_btn = gr.ClearButton(value='Clear', components=[song_input, rvc_model, keep_files, local_file])
             generate_btn = gr.Button("Generate", variant='primary')
@@ -180,13 +208,17 @@ def inference_tab():
                 protect_back, pitch_extract_back, hop_length_back,
                 export_format_rvc_back, split_audio_back, autotune_back, embedder_model_back,
                 hf_upload, hf_repo_id, hf_token,
+                duet_enabled, duet_model, duet_mode, duet_split, duet_interval,
+                save_drive, drive_folder,
             ],
             outputs=[ai_cover]
         )
         clear_btn.click(
             lambda: [0, 0, 0, 0, 0.5, 3, 0.25, 0.33, 'rmvpe', 128, 0, 0.15, 0.2, 0.8, 0.7, 1.0, 'mp3', 'mp3', None, True, 1, True, False, False, False, 0, 0,
                      False, None, '', 0, 3, 0.5, 0.25, 0.33, 'rmvpe+', 128, 'wav', False, False, 'contentvec',
-                     False, '', ''],
+                     False, '', '',
+                     False, None, 'alternate', 50, 15,
+                     False, DEFAULT_DRIVE_FOLDER],
             outputs=[pitch, main_gain, backup_gain, inst_gain, index_rate, filter_radius, rms_mix_rate,
                      protect, f0_method, crepe_hop_length, pitch_all, reverb_rm_size, reverb_wet,
                      reverb_dry, reverb_damping, reverb_width, output_format, export_format_final,
@@ -197,5 +229,7 @@ def inference_tab():
                      pitch_back, filter_radius_back, index_rate_back, rms_mix_rate_back,
                      protect_back, pitch_extract_back, hop_length_back,
                      export_format_rvc_back, split_audio_back, autotune_back, embedder_model_back,
-                     hf_upload, hf_repo_id, hf_token]
+                     hf_upload, hf_repo_id, hf_token,
+                     duet_enabled, duet_model, duet_mode, duet_split, duet_interval,
+                     save_drive, drive_folder]
         )

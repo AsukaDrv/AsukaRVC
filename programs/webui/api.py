@@ -27,6 +27,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from config.logging_setup import get_logger
+from programs.colab_drive import DEFAULT_DRIVE_FOLDER, in_colab
+from programs.duet_cover import DUET_MODES
 from programs.webui.jobs import BusyError, manager
 from ui.tabs.common import (
     AUDIO_EXTENSIONS,
@@ -111,6 +113,9 @@ def options():
         "output_formats": ["mp3", "wav"],
         "final_formats": ["mp3", "wav", "flac"],
         "embedders": ["contentvec", "chinese-hubert-base", "japanese-hubert-base", "korean-hubert-base"],
+        "duet_modes": list(DUET_MODES),
+        "colab": in_colab(),
+        "drive_folder": DEFAULT_DRIVE_FOLDER,
         "train": {
             "sample_rates": [32000, 40000, 48000],
             "vocoders": ["HiFi-GAN", "MRF HiFi-GAN", "RefineGAN"],
@@ -301,9 +306,15 @@ async def upload_audio(file: UploadFile = File(...)):
 # ------------------------------------------------------------------ inference
 
 
+class SaveDriveRequest(BaseModel):
+    """Copy a finished result file into the user's Google Drive (Colab)."""
+
+    path: str
+    folder: str = DEFAULT_DRIVE_FOLDER
+
+
 class InferenceRequest(BaseModel):
     """AI cover pipeline parameters — defaults mirror the Gradio Inference tab."""
-
     song_input: str  # YouTube/URL link or local audio path
     voice_model: str
     pitch_change: int = 0          # octaves, AI vocals only
@@ -357,6 +368,13 @@ class InferenceRequest(BaseModel):
     hf_upload: bool = False
     hf_repo_id: str = ""
     hf_token: str = ""
+    duet_enabled: bool = False
+    duet_model: str | None = None
+    duet_mode: str = "alternate"
+    duet_split: float = 50
+    duet_interval: float = 15
+    save_drive: bool = False
+    drive_folder: str = DEFAULT_DRIVE_FOLDER
     batch_size: int = 1
     use_tta: bool = False
 
@@ -370,9 +388,27 @@ def start_inference(req: InferenceRequest):
     known_models = {model["name"] for model in _list_voice_models()}
     if req.voice_model not in known_models:
         raise HTTPException(status_code=400, detail=f"Voice model '{req.voice_model}' is not installed.")
+    if req.duet_enabled:
+        if not (req.duet_model or "").strip():
+            raise HTTPException(status_code=400, detail="Select the second duet voice model, or disable the duet option.")
+        if req.duet_model not in known_models:
+            raise HTTPException(status_code=400, detail=f"Duet voice model '{req.duet_model}' is not installed.")
+        if req.duet_model == req.voice_model:
+            raise HTTPException(status_code=400, detail="The duet second voice must be different from the main voice model.")
+        if req.duet_mode not in DUET_MODES:
+            raise HTTPException(status_code=400, detail=f"Unknown duet mode '{req.duet_mode}'. Choose from: {', '.join(DUET_MODES)}.")
+        if not 1 <= req.duet_split <= 99:
+            raise HTTPException(status_code=400, detail="The duet split point must be between 1 and 99 percent.")
+        if req.duet_interval < 1:
+            raise HTTPException(status_code=400, detail="The duet interval must be at least 1 second.")
+    if req.save_drive and not in_colab():
+        raise HTTPException(status_code=400, detail="Google Drive save is only available in Google Colab.")
 
     if IS_ZERO_GPU:
         req.keep_files = False  # ZeroGPU sessions keep no intermediate files (same as the Gradio UI)
+
+    duet_model = (req.duet_model or "").strip() if req.duet_enabled else ""
+    job_title = f"AI cover — {req.voice_model} × {duet_model} duet" if duet_model else f"AI cover — {req.voice_model}"
 
     def _run_pipeline():
         # Lazy import: pulls programs.core (torch, audio_separator, ...).
@@ -433,12 +469,48 @@ def start_inference(req: InferenceRequest):
             hf_upload=req.hf_upload,
             hf_repo_id=req.hf_repo_id,
             hf_token=req.hf_token,
+            duet_enabled=req.duet_enabled,
+            duet_model=duet_model or None,
+            duet_mode=req.duet_mode,
+            duet_split=req.duet_split,
+            duet_interval=req.duet_interval,
+            save_drive=req.save_drive,
+            drive_folder=req.drive_folder,
             batch_size=req.batch_size,
             use_tta=req.use_tta,
         )
 
     try:
-        job = manager.start_callable("inference", f"AI cover — {req.voice_model}", _run_pipeline)
+        job = manager.start_callable("inference", job_title, _run_pipeline)
+    except BusyError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {"job_id": job.id}
+
+
+@router.post("/jobs/save-drive")
+def save_drive_job(req: SaveDriveRequest):
+    """Copy an already generated cover (or any pipeline output) to Google Drive."""
+    if not in_colab():
+        raise HTTPException(status_code=400, detail="Google Drive save is only available in Google Colab.")
+    # Only files produced by the pipeline (song output directory) can be saved;
+    # anything else would allow poking at arbitrary server files.
+    target = os.path.realpath(req.path)
+    output_root = os.path.realpath(output_dir)
+    if not target.startswith(output_root + os.sep):
+        raise HTTPException(status_code=403, detail="Only generated cover files can be saved to Drive.")
+    if not os.path.isfile(target):
+        raise HTTPException(status_code=404, detail="Result file not found.")
+
+    def _run(job):
+        from programs.colab_drive import save_file_to_drive
+
+        destination = save_file_to_drive(target, req.folder)
+        job_log = f"Saved to Google Drive: {destination}"
+        manager.set_log(job, job_log)
+        return destination
+
+    try:
+        job = manager.start_callable("save-drive", f"Save to Drive — {os.path.basename(target)}", _run, pass_job=True)
     except BusyError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     return {"job_id": job.id}

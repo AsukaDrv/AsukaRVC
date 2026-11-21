@@ -149,6 +149,31 @@
         </details>
 
         <details class="accordion">
+          <summary>Duet cover — two AI voices (optional)</summary>
+          <label class="check"><input type="checkbox" id="duet-enabled" /> Enable duet: a second voice model sings part of the song</label>
+          <div id="duet-block" hidden>
+            <div class="grid-2">
+              <label class="field"><span>Second voice model</span><select id="duet-model"></select></label>
+              <label class="field">
+                <span>Duet style</span>
+                <select id="duet-mode">
+                  <option value="alternate">Alternate — voices swap every N seconds</option>
+                  <option value="sequential">Sequential — A sings the first part, B the rest</option>
+                  <option value="overlap">Overlap — both voices sing together</option>
+                </select>
+              </label>
+            </div>
+            <div class="grid-2">
+              <label class="slider-field"><span>Sequential split (%) — where voice B takes over — <b id="duet-split-val">50</b></span>
+                <input type="range" id="duet-split" min="5" max="95" step="1" value="50" /></label>
+              <label class="slider-field"><span>Alternate interval (seconds per voice) — <b id="duet-interval-val">15</b></span>
+                <input type="range" id="duet-interval" min="5" max="60" step="1" value="15" /></label>
+            </div>
+            <p class="hint">The song is converted once per voice model, then both takes are woven into one duet vocal track with short crossfades. The second model must differ from the main one.</p>
+          </div>
+        </details>
+
+        <details class="accordion">
           <summary>Backing vocals RVC (optional)</summary>
           <label class="check"><input type="checkbox" id="infer-backing-vocals" /> Convert backing vocals with a separate RVC model</label>
           <div id="backing-block" hidden>
@@ -230,6 +255,12 @@
             <label class="field"><span>HF token (write access)</span><input type="password" id="hf-token" placeholder="hf_…" /></label>
           </div>
         </details>
+        <details class="accordion" id="drive-accordion" hidden>
+          <summary>Google Drive (Colab)</summary>
+          <label class="check"><input type="checkbox" id="save-drive" /> Auto-save the result to Google Drive</label>
+          <label class="field"><span>Drive folder (under MyDrive)</span><input type="text" id="drive-folder" placeholder="AsukaRVC" /></label>
+          <p class="hint">Your Drive is mounted automatically on first save, so the cover survives the Colab runtime.</p>
+        </details>
       </div>
 
       <div class="card">
@@ -240,7 +271,10 @@
           <audio id="result-audio" controls></audio>
           <div class="result-meta">
             <span id="result-path" class="mono"></span>
-            <a class="btn btn-secondary btn-sm" id="result-download" download>Download</a>
+            <div class="result-actions">
+              <a class="btn btn-secondary btn-sm" id="result-download" download>Download</a>
+              <button class="btn btn-secondary btn-sm" id="result-drive-btn" hidden>Save to Google Drive</button>
+            </div>
           </div>
         </div>
       </div>
