@@ -11,8 +11,8 @@ import gradio as gr
 BASE_DIR = os.getcwd()
 IS_ZERO_GPU = os.getenv("SPACES_ZERO_GPU")
 
-rvc_models_dir = os.path.join(BASE_DIR, 'rvc_models')
-output_dir = os.path.join(BASE_DIR, 'song_output')
+rvc_models_dir = os.path.join(BASE_DIR, 'assets', 'rvc_models')
+output_dir = os.path.join(BASE_DIR, 'assets', 'song_output')
 
 _public_models_cache = None
 
