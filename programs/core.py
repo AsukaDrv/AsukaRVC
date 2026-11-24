@@ -28,9 +28,6 @@ from audio_separator.separator import Separator
 
 from programs.rvc.lib.tools.model_download import model_download_pipeline
 from programs.colab_drive import DEFAULT_DRIVE_FOLDER, save_file_to_drive
-# Duet weaving is pure pydub logic — kept in a torch-free module so the web
-# API can validate duet requests before the ML stack is loaded. The names are
-# re-exported here for backward compatibility (CLI / existing callers).
 from programs.duet_cover import DUET_MODES, build_duet_vocals
 from config.logging_setup import get_logger
 
@@ -41,8 +38,8 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IS_ZERO_GPU = os.getenv("SPACES_ZERO_GPU")
 now_dir = os.getcwd()
 sys.path.append(now_dir)
-rvc_models_dir = os.path.join(now_dir, 'rvc_models')
-output_dir = os.path.join(now_dir, 'song_output')
+rvc_models_dir = os.path.join(now_dir, 'assets', 'rvc_models')
+output_dir = os.path.join(now_dir, 'assets', 'song_output')
 
 # MSST models are handled by the inference script in programs/music_separation_code,
 # while VR/MDX models (UVR-*) are handled by the audio-separator library.
